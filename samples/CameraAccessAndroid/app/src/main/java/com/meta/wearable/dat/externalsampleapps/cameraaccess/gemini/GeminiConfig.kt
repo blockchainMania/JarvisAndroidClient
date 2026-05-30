@@ -33,6 +33,19 @@ object GeminiConfig {
     val openClawGatewayToken: String
         get() = SettingsManager.openClawGatewayToken
 
+    // Jarvis Memory API (replaces OpenClaw in this fork)
+    val jarvisApiBase: String
+        get() = SettingsManager.jarvisApiBase
+
+    val jarvisApiKey: String
+        get() = SettingsManager.jarvisApiKey
+
+    val isJarvisConfigured: Boolean
+        get() = jarvisApiBase != "http://YOUR_HOST:8000"
+                && jarvisApiBase.isNotEmpty()
+                && jarvisApiKey != "YOUR_JARVIS_API_KEY"
+                && jarvisApiKey.isNotEmpty()
+
     fun websocketURL(): String? {
         if (apiKey == "YOUR_GEMINI_API_KEY" || apiKey.isEmpty()) return null
         return "$WEBSOCKET_BASE_URL?key=$apiKey"

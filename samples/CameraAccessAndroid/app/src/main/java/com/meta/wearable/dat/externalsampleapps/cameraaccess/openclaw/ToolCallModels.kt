@@ -3,7 +3,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 import org.json.JSONArray
 import org.json.JSONObject
 
-// Gemini Tool Call (parsed from server JSON)
+// ─── Gemini Tool Call (parsed from server JSON) ──────────────────
 
 data class GeminiFunctionCall(
     val id: String,
@@ -38,7 +38,7 @@ data class GeminiToolCall(
     }
 }
 
-// Gemini Tool Call Cancellation
+// ─── Gemini Tool Call Cancellation ───────────────────────────────
 
 data class GeminiToolCallCancellation(
     val ids: List<String>
@@ -56,7 +56,7 @@ data class GeminiToolCallCancellation(
     }
 }
 
-// Tool Result
+// ─── Tool Result ─────────────────────────────────────────────────
 
 sealed class ToolResult {
     data class Success(val result: String) : ToolResult()
@@ -68,7 +68,7 @@ sealed class ToolResult {
     }
 }
 
-// Tool Call Status (for UI)
+// ─── Tool Call Status (for UI) ──────────────────────────────────
 
 sealed class ToolCallStatus {
     data object Idle : ToolCallStatus()
@@ -90,7 +90,7 @@ sealed class ToolCallStatus {
         get() = this is Executing
 }
 
-// OpenClaw Connection State
+// ─── Connection State (Jarvis API, name kept for compatibility) ──
 
 sealed class OpenClawConnectionState {
     data object NotConfigured : OpenClawConnectionState()
@@ -99,28 +99,151 @@ sealed class OpenClawConnectionState {
     data class Unreachable(val message: String) : OpenClawConnectionState()
 }
 
-// Tool Declarations (for Gemini setup message)
+// ─── Jarvis Tool Declarations (sent to Gemini at session setup) ──
+//
+// 8 typed functions that map 1:1 to Jarvis Memory API endpoints.
+// Type name `ToolDeclarations` is preserved for wiring compatibility.
 
 object ToolDeclarations {
-    fun allDeclarationsJSON(): JSONArray {
-        return JSONArray().put(executeJSON())
+    fun allDeclarationsJSON(): JSONArray = JSONArray()
+        .put(savePerson())
+        .put(searchPeople())
+        .put(saveMeeting())
+        .put(searchMeetings())
+        .put(saveMemory())
+        .put(searchMemory())
+        .put(saveNeed())
+        .put(getProposalContext())
+
+    // ── helpers ───────────────────────────────────────────────────
+    private fun strProp(desc: String) = JSONObject()
+        .put("type", "string")
+        .put("description", desc)
+
+    private fun intProp(desc: String) = JSONObject()
+        .put("type", "integer")
+        .put("description", desc)
+
+    private fun arrStrProp(desc: String) = JSONObject()
+        .put("type", "array")
+        .put("items", JSONObject().put("type", "string"))
+        .put("description", desc)
+
+    private fun enumProp(desc: String, values: List<String>) = JSONObject()
+        .put("type", "string")
+        .put("description", desc)
+        .put("enum", JSONArray(values))
+
+    private fun decl(
+        name: String,
+        description: String,
+        properties: JSONObject,
+        required: List<String>,
+    ): JSONObject = JSONObject().apply {
+        put("name", name)
+        put("description", description)
+        put("parameters", JSONObject().apply {
+            put("type", "object")
+            put("properties", properties)
+            put("required", JSONArray(required))
+        })
+        put("behavior", "BLOCKING")
     }
 
-    private fun executeJSON(): JSONObject {
-        return JSONObject().apply {
-            put("name", "execute")
-            put("description", "Your only way to take action. You have no memory, storage, or ability to do anything on your own -- use this tool for everything: sending messages, searching the web, adding to lists, setting reminders, creating notes, research, drafts, scheduling, smart home control, app interactions, or any request that goes beyond answering a question. When in doubt, use this tool.")
-            put("parameters", JSONObject().apply {
-                put("type", "object")
-                put("properties", JSONObject().apply {
-                    put("task", JSONObject().apply {
-                        put("type", "string")
-                        put("description", "Clear, detailed description of what to do. Include all relevant context: names, content, platforms, quantities, etc.")
-                    })
-                })
-                put("required", JSONArray().put("task"))
-            })
-            put("behavior", "BLOCKING")
-        }
-    }
+    // ── 8 declarations ────────────────────────────────────────────
+    private fun savePerson() = decl(
+        name = "save_person",
+        description = "사용자가 새 사람을 메모리에 저장하라고 할 때. 예: '이 사람 저장해줘', '방금 만난 박부장 등록'.",
+        properties = JSONObject()
+            .put("name", strProp("사람 이름 (한국어/영어)"))
+            .put("aliases", arrStrProp("별칭/닉네임 목록 (선택)"))
+            .put("org", strProp("소속 회사/조직 (선택)"))
+            .put("role", strProp("직책/역할 (선택)"))
+            .put("notes_summary", strProp("간단한 요약/메모 (선택)")),
+        required = listOf("name"),
+    )
+
+    private fun searchPeople() = decl(
+        name = "search_people",
+        description = "이름·별칭·회사명으로 사람을 찾을 때. 예: '박부장 누구지', 'DH배터리 사람'.",
+        properties = JSONObject()
+            .put("query", strProp("검색어 (이름·별칭·회사)"))
+            .put("top_k", intProp("반환할 최대 개수 (기본 5)")),
+        required = listOf("query"),
+    )
+
+    private fun saveMeeting() = decl(
+        name = "save_meeting",
+        description = "방금 끝난 또는 과거의 미팅을 기록할 때. summary는 미팅에서 나온 핵심 논의를 한두 문장으로.",
+        properties = JSONObject()
+            .put("title", strProp("미팅 제목 (선택)"))
+            .put("person_ids", arrStrProp("참석자 person UUID 목록"))
+            .put("started_at", strProp("미팅 시작 시각 ISO 8601 UTC, 예: 2026-05-30T10:00:00Z"))
+            .put("ended_at", strProp("미팅 종료 시각 ISO 8601 UTC (선택)"))
+            .put("location", strProp("장소 (선택)"))
+            .put("summary", strProp("미팅 요약 (의미 검색에 쓰임)"))
+            .put("raw_transcript", strProp("발화 원문 (선택, 길어도 OK)")),
+        required = listOf("person_ids", "started_at", "summary"),
+    )
+
+    private fun searchMeetings() = decl(
+        name = "search_meetings",
+        description = "미팅을 의미 기반으로 검색. 예: '지난번 배터리 부품사 미팅', '안전성 관련 미팅'.",
+        properties = JSONObject()
+            .put("query", strProp("자연어 검색 쿼리"))
+            .put("top_k", intProp("반환할 최대 개수 (기본 5)"))
+            .put("time_from", strProp("시작 시간 (ISO 8601 UTC, 선택)"))
+            .put("time_to", strProp("끝 시간 (ISO 8601 UTC, 선택)"))
+            .put("person_id", strProp("특정 person UUID로 필터 (선택)")),
+        required = listOf("query"),
+    )
+
+    private fun saveMemory() = decl(
+        name = "save_memory",
+        description = "임의의 사실·관찰·발화를 episodic 메모리에 저장. 예: '이거 기억해', '방금 본 책 제목 메모'. source는 camera/voice/manual/derived 중 하나.",
+        properties = JSONObject()
+            .put("text", strProp("저장할 내용"))
+            .put("captured_at", strProp("관측 시각 ISO 8601 UTC"))
+            .put("related_person_ids", arrStrProp("관련된 person UUID 목록 (선택)"))
+            .put("related_meeting_id", strProp("관련 미팅 UUID (선택)"))
+            .put("source", enumProp("출처", listOf("camera", "voice", "manual", "derived"))),
+        required = listOf("text", "captured_at"),
+    )
+
+    private fun searchMemory() = decl(
+        name = "search_memory",
+        description = "episodic 메모리를 의미·시간·인물로 검색. 예: '1시간 전 본 거', '지난주 만난 사람들과의 대화'.",
+        properties = JSONObject()
+            .put("query", strProp("자연어 검색 쿼리"))
+            .put("top_k", intProp("반환할 최대 개수 (기본 5)"))
+            .put("time_from", strProp("시작 시간 (ISO 8601 UTC, 선택)"))
+            .put("time_to", strProp("끝 시간 (ISO 8601 UTC, 선택)"))
+            .put("person_id", strProp("특정 person UUID로 필터 (선택)")),
+        required = listOf("query"),
+    )
+
+    private fun saveNeed() = decl(
+        name = "save_need",
+        description = "사람의 니즈·관심사·제약을 기록. 미팅에서 추출한 신호를 저장할 때 사용.",
+        properties = JSONObject()
+            .put("person_id", strProp("주인공 person UUID"))
+            .put("meeting_id", strProp("출처 meeting UUID (선택)"))
+            .put("text", strProp("니즈 내용. 예: '안전성 인증서 요구'"))
+            .put("category", enumProp(
+                "카테고리",
+                listOf("pain", "interest", "constraint", "budget", "timeline"),
+            ))
+            .put("confidence", JSONObject()
+                .put("type", "number")
+                .put("description", "0.0~1.0 확신도 (선택, 기본 1.0)")),
+        required = listOf("person_id", "text"),
+    )
+
+    private fun getProposalContext() = decl(
+        name = "get_proposal_context",
+        description = "특정 사람을 위한 제안 합성용 컨텍스트(person + needs + 최근 미팅)를 가져옴. 사용자가 '이 사람한테 어떤 제안 좋을지', '관심 있어 할 포인트' 같이 물을 때. 결과를 받아 직접 한국어로 합성해 답하세요.",
+        properties = JSONObject()
+            .put("person_id", strProp("대상 person UUID")),
+        required = listOf("person_id"),
+    )
 }

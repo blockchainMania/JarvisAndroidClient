@@ -1,5 +1,9 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
+// NOTE: Routes Gemini function calls to the Jarvis bridge (`OpenClawBridge`
+// is the class name kept for wiring compatibility — it's a Jarvis client).
+// Dispatch is by function name now, not a single `execute` task string.
+
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -28,20 +32,18 @@ class ToolCallRouter(
 
         Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
 
-        // Circuit breaker: stop sending tool calls after repeated failures
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
             Log.d(TAG, "Circuit breaker open ($consecutiveFailures consecutive failures), rejecting $callId")
             val errorResult = ToolResult.Failure(
                 "Tool execution is temporarily unavailable after $consecutiveFailures consecutive failures. " +
-                "Please tell the user you cannot complete this action right now and suggest they check their OpenClaw gateway connection."
+                "Please tell the user you cannot complete this action right now and suggest they check the Jarvis API connection."
             )
             sendResponse(buildToolResponse(callId, callName, errorResult))
             return
         }
 
         val job = scope.launch {
-            val taskDesc = call.args["task"]?.toString() ?: call.args.toString()
-            val result = bridge.delegateTask(task = taskDesc, toolName = callName)
+            val result = bridge.dispatch(callName, call.args)
 
             if (!coroutineContext[Job]!!.isCancelled) {
                 Log.d(TAG, "Result for $callName (id: $callId): $result")
@@ -51,8 +53,7 @@ class ToolCallRouter(
                     is ToolResult.Failure -> consecutiveFailures++
                 }
 
-                val response = buildToolResponse(callId, callName, result)
-                sendResponse(response)
+                sendResponse(buildToolResponse(callId, callName, result))
             } else {
                 Log.d(TAG, "Task $callId was cancelled, skipping response")
             }
