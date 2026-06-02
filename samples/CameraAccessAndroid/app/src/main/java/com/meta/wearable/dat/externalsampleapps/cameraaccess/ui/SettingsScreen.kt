@@ -165,7 +165,7 @@ fun SettingsScreen(
                 Column {
                     Text("Video Streaming", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "Disable to save battery. Audio remains active.",
+                        "Keep off for daily use. Audio remains active.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

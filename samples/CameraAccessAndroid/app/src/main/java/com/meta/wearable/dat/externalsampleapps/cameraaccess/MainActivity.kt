@@ -10,9 +10,12 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess
 
 import android.Manifest.permission.BLUETOOTH
 import android.Manifest.permission.BLUETOOTH_CONNECT
+import android.Manifest.permission.BLUETOOTH_SCAN
 import android.Manifest.permission.CAMERA
 import android.Manifest.permission.INTERNET
+import android.Manifest.permission.POST_NOTIFICATIONS
 import android.Manifest.permission.RECORD_AUDIO
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -34,9 +37,22 @@ import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
   companion object {
-    val PERMISSIONS: Array<String> = arrayOf(
-        BLUETOOTH, BLUETOOTH_CONNECT, INTERNET, RECORD_AUDIO, CAMERA,
-    )
+    val PERMISSIONS: Array<String>
+      get() =
+          buildList {
+                add(BLUETOOTH)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                  add(BLUETOOTH_SCAN)
+                  add(BLUETOOTH_CONNECT)
+                }
+                add(INTERNET)
+                add(RECORD_AUDIO)
+                add(CAMERA)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                  add(POST_NOTIFICATIONS)
+                }
+              }
+              .toTypedArray()
   }
 
   val viewModel: WearablesViewModel by viewModels()
@@ -94,7 +110,7 @@ class MainActivity : ComponentActivity() {
             onPermissionsGranted()
           } else {
             viewModel.setRecentError(
-                "Allow All Permissions (Bluetooth, Bluetooth Connect, Internet, Microphone, Camera)"
+                "Allow All Permissions (Bluetooth scan/connect, notifications, microphone, camera)"
             )
           }
         }

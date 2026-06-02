@@ -2,6 +2,23 @@
 
 ![VisionClaw](assets/teaserimage.png)
 
+## 자비스 OS Android 통합 브랜치
+
+이 브랜치는 Meta Ray-Ban 스마트 글라스 + Gemini Live + Jarvis Memory API를 연결한 자비스 OS 안드로이드 클라이언트 통합 버전입니다.
+
+현재 핵심 흐름:
+
+```text
+평상시: 음성만 Gemini Live로 대화
+시야가 필요한 질문: Gemini가 capture_current_view 호출 -> 최신 이미지 1장만 전송
+저장 요청: 이미지 해석 + 사용자 메모 -> save_life_memory -> Jarvis Memory API 저장
+검색 요청: search_memory/search_people/search_meetings -> Gemini가 자연어 답변
+```
+
+비용을 줄이기 위해 Gemini로 비디오를 계속 보내지 않습니다. Settings의 `Video Streaming`은 기본값이 꺼져 있으며, 현재 시야가 필요할 때만 최신 프레임 1장을 보냅니다.
+
+Android 실행/설정은 [samples/CameraAccessAndroid/README.md](samples/CameraAccessAndroid/README.md)를 참고하세요. Jarvis 서버 설정은 FaceDetectionAPP 레포의 `jarvis-server/README.md`를 참고하세요.
+
 A real-time AI assistant for Meta Ray-Ban smart glasses. See what you see, hear what you say, and take actions on your behalf -- all through voice.
 
 ![Cover](assets/cover.png)

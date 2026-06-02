@@ -13,7 +13,8 @@ import org.json.JSONObject
 
 class ToolCallRouter(
     private val bridge: OpenClawBridge,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val localToolHandler: (suspend (GeminiFunctionCall) -> ToolResult)? = null,
 ) {
     companion object {
         private const val TAG = "ToolCallRouter"
@@ -43,7 +44,10 @@ class ToolCallRouter(
         }
 
         val job = scope.launch {
-            val result = bridge.dispatch(callName, call.args)
+            val result = when {
+                localToolHandler != null && callName in LOCAL_TOOL_NAMES -> localToolHandler.invoke(call)
+                else -> bridge.dispatch(callName, call.args)
+            }
 
             if (!coroutineContext[Job]!!.isCancelled) {
                 Log.d(TAG, "Result for $callName (id: $callId): $result")
@@ -63,6 +67,8 @@ class ToolCallRouter(
 
         inFlightJobs[callId] = job
     }
+
+    private val LOCAL_TOOL_NAMES = setOf("capture_current_view")
 
     fun cancelToolCalls(ids: List<String>) {
         for (id in ids) {

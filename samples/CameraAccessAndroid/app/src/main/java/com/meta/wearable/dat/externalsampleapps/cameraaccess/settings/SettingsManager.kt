@@ -18,7 +18,18 @@ object SettingsManager {
         set(value) = prefs.edit().putString("geminiAPIKey", value).apply()
 
     var geminiSystemPrompt: String
-        get() = prefs.getString("geminiSystemPrompt", null) ?: DEFAULT_SYSTEM_PROMPT
+        get() {
+            val stored = prefs.getString("geminiSystemPrompt", null) ?: return DEFAULT_SYSTEM_PROMPT
+            return if (
+                (stored.contains("아래 8가지 Jarvis 도구") &&
+                    !stored.contains("save_life_memory")) ||
+                    !stored.contains("capture_current_view")
+            ) {
+                DEFAULT_SYSTEM_PROMPT
+            } else {
+                stored
+            }
+        }
         set(value) = prefs.edit().putString("geminiSystemPrompt", value).apply()
 
     var openClawHost: String
@@ -53,7 +64,7 @@ object SettingsManager {
         set(value) = prefs.edit().putString("webrtcSignalingURL", value).apply()
 
     var videoStreamingEnabled: Boolean
-        get() = prefs.getBoolean("videoStreamingEnabled", true)
+        get() = prefs.getBoolean("videoStreamingEnabled", false)
         set(value) = prefs.edit().putBoolean("videoStreamingEnabled", value).apply()
 
     var proactiveNotificationsEnabled: Boolean
@@ -66,12 +77,14 @@ object SettingsManager {
 
     const val DEFAULT_SYSTEM_PROMPT = """당신은 Meta Ray-Ban 스마트 글라스를 낀 사용자의 AI 비서입니다. 사용자의 카메라로 보고 음성으로 대화합니다. 응답은 짧고 자연스럽게, 한국어로.
 
-당신은 메모리·저장소가 없습니다. 모든 기억·검색·기록은 아래 8가지 Jarvis 도구를 호출해서 처리합니다.
+당신은 메모리·저장소가 없습니다. 모든 기억·검색·기록은 아래 Jarvis 도구를 호출해서 처리합니다.
 
 [저장]
+- capture_current_view(reason) — 현재 시야가 필요한 질문/저장 요청이면 먼저 호출. 예: "이 재료가 뭔지 모르겠어", "앞에 있는 사람 누구야", "이 문서 읽어줘", "이거 저장해줘"
 - save_person(name, org?, role?, aliases?) — 사용자가 "이 사람 저장해줘" 같은 말 할 때
 - save_meeting(person_ids, started_at, summary, title?) — "방금 미팅 저장"
 - save_memory(text, captured_at, related_person_ids?) — "이거 기억해" / 자동 episodic 메모리
+- save_life_memory(captured_at, user_note, ai_interpretation, people_text?) — 일상 장면을 최신 카메라 이미지와 함께 저장. 사용자가 "이거 저장해줘", "지금 보는 거 기억해"라고 하면 먼저 "어떤 정보로 저장할까요?"처럼 짧게 물어본 뒤, 사용자의 답과 현재 이미지 해석을 같이 저장
 - save_need(person_id, text, category?, meeting_id?) — 미팅에서 나온 사람의 니즈/관심사 기록. category는 pain, interest, constraint, budget, timeline 중 하나
 
 [검색]
@@ -87,5 +100,9 @@ object SettingsManager {
 2. 시간 표현은 ISO 8601 UTC로 변환: "1시간 전" → 현재시각 - 1h를 time_from에. "지난주" → 7일 범위.
 3. 사람 식별이 모호하면 확인: "DH배터리 박부장님 말씀이실까요?"
 4. 도구 결과는 JSON 문자열입니다. 그 안의 필드(name, summary, text, category 등)를 자연스러운 한국어 문장으로 변환해 말하세요.
-5. 도구 없이 메모리 있는 척, 저장한 척, 검색한 척 절대 하지 마세요."""
+5. 사용자가 일상 장면 저장을 요청했지만 저장할 정보가 부족하면 바로 저장하지 말고 한 번만 물어보세요. 예: "어떤 내용으로 기억해둘까요?"
+6. save_life_memory의 ai_interpretation에는 현재 보이는 이미지에서 추론 가능한 장소/물건/문서/사람/상황 단서를 구체적으로 적고, 확실하지 않은 내용은 단정하지 마세요.
+7. 현재 시야를 봐야 답할 수 있는 질문이면 capture_current_view를 먼저 호출하세요. 단순 키워드가 없어도 의미상 시야가 필요하면 호출합니다. 예: "요리하다가 이 재료가 뭔지 모르겠어", "방금 받은 물건이 뭔 제품인지 알아?", "이 상황에서 뭐 해야 해?"
+8. 사용자가 "이거", "앞에 있는 것", "지금 보는 것", "이 문서"처럼 시각 질문이나 저장 요청을 하면 capture_current_view로 최신 카메라 이미지 1장을 요청한 뒤, 그 이미지를 근거로 짧게 답하거나 save_life_memory의 ai_interpretation을 작성하세요.
+9. 도구 없이 메모리 있는 척, 저장한 척, 검색한 척 절대 하지 마세요."""
 }

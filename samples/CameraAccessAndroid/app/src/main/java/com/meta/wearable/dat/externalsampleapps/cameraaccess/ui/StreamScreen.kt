@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +32,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -110,6 +113,11 @@ fun StreamScreen(
             webrtcViewModel.clearError()
         }
     }
+    LaunchedEffect(streamUiState.errorMessage) {
+        streamUiState.errorMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         // Video feed
@@ -122,10 +130,30 @@ fun StreamScreen(
             )
         }
 
-        if (streamUiState.streamSessionState == StreamSessionState.STARTING) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-            )
+        if (streamUiState.videoFrame == null) {
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (
+                    streamUiState.streamSessionState == StreamSessionState.STARTING ||
+                    streamUiState.streamingMode == StreamingMode.PHONE
+                ) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                Text(
+                    text = streamUiState.errorMessage
+                        ?: if (streamUiState.streamingMode == StreamingMode.PHONE) {
+                            "Starting phone camera..."
+                        } else {
+                            "Starting glasses camera..."
+                        },
+                    color = androidx.compose.ui.graphics.Color.White,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         // Overlays + controls

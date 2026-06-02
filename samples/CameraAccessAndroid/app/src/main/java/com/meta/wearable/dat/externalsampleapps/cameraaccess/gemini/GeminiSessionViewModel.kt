@@ -8,8 +8,11 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawBr
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawEventClient
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiFunctionCall
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallRouter
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.VisualMemoryFrameStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -44,6 +47,8 @@ class GeminiSessionViewModel : ViewModel() {
     private val audioManager = AudioManager()
     private val eventClient = OpenClawEventClient()
     private var lastVideoFrameTime: Long = 0
+    private var visualContextSentForTurn: Boolean = false
+    private var lastOnDemandVisualContextAt: Long = 0
     private var stateObservationJob: Job? = null
 
     var streamingMode: StreamingMode = StreamingMode.GLASSES
@@ -76,12 +81,15 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onTurnComplete = {
+            visualContextSentForTurn = false
             _uiState.value = _uiState.value.copy(userTranscript = "")
         }
 
         geminiService.onInputTranscription = { text ->
+            val transcript = _uiState.value.userTranscript + text
+            maybeSendOnDemandVisualContext(transcript)
             _uiState.value = _uiState.value.copy(
-                userTranscript = _uiState.value.userTranscript + text,
+                userTranscript = transcript,
                 aiTranscript = ""
             )
         }
@@ -107,7 +115,11 @@ class GeminiSessionViewModel : ViewModel() {
             openClawBridge.resetSession()
 
             // Wire tool call handling
-            toolCallRouter = ToolCallRouter(openClawBridge, viewModelScope)
+            toolCallRouter = ToolCallRouter(
+                openClawBridge,
+                viewModelScope,
+                localToolHandler = ::handleLocalToolCall,
+            )
 
             geminiService.onToolCall = { toolCall ->
                 for (call in toolCall.functionCalls) {
@@ -188,10 +200,12 @@ class GeminiSessionViewModel : ViewModel() {
         geminiService.disconnect()
         stateObservationJob?.cancel()
         stateObservationJob = null
+        visualContextSentForTurn = false
         _uiState.value = GeminiUiState()
     }
 
     fun sendVideoFrameIfThrottled(bitmap: Bitmap) {
+        VisualMemoryFrameStore.update(bitmap)
         if (!SettingsManager.videoStreamingEnabled) return
         if (!_uiState.value.isGeminiActive) return
         if (_uiState.value.connectionState != GeminiConnectionState.Ready) return
@@ -199,6 +213,84 @@ class GeminiSessionViewModel : ViewModel() {
         if (now - lastVideoFrameTime < GeminiConfig.VIDEO_FRAME_INTERVAL_MS) return
         lastVideoFrameTime = now
         geminiService.sendVideoFrame(bitmap)
+    }
+
+    private fun maybeSendOnDemandVisualContext(transcript: String) {
+        if (visualContextSentForTurn) return
+        if (!_uiState.value.isGeminiActive) return
+        if (_uiState.value.connectionState != GeminiConnectionState.Ready) return
+        if (!looksLikeVisualRequest(transcript)) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastOnDemandVisualContextAt < 3_000L) return
+        val latestFrame = VisualMemoryFrameStore.latestBase64() ?: return
+
+        visualContextSentForTurn = true
+        lastOnDemandVisualContextAt = now
+        geminiService.sendVideoFrameBase64(latestFrame)
+        Log.d(TAG, "Sent one on-demand visual frame for transcript=${transcript.take(80)}")
+    }
+
+    private suspend fun handleLocalToolCall(call: GeminiFunctionCall): ToolResult {
+        return when (call.name) {
+            "capture_current_view" -> captureCurrentView(call)
+            else -> ToolResult.Failure("Unknown local tool: ${call.name}")
+        }
+    }
+
+    private fun captureCurrentView(call: GeminiFunctionCall): ToolResult {
+        val latestFrame = VisualMemoryFrameStore.latestBase64()
+            ?: return ToolResult.Failure(
+                "No camera frame is available yet. Ask the user to start camera streaming, then retry."
+            )
+
+        geminiService.sendVideoFrameBase64(latestFrame)
+        visualContextSentForTurn = true
+        lastOnDemandVisualContextAt = System.currentTimeMillis()
+
+        val reason = call.args["reason"]?.toString() ?: "current visual context"
+        Log.d(TAG, "capture_current_view sent one frame, reason=$reason")
+        return ToolResult.Success(
+            "Attached one current camera frame to this conversation. Use the image to answer the user's visual question or to fill ai_interpretation before saving. reason=$reason"
+        )
+    }
+
+    private fun looksLikeVisualRequest(transcript: String): Boolean {
+        val normalized = transcript.lowercase()
+        val visualReferences = listOf(
+            "이거",
+            "이것",
+            "저거",
+            "저것",
+            "앞에",
+            "눈앞",
+            "보고 있는",
+            "지금 보는",
+            "현재 보는",
+            "보이는",
+            "화면",
+            "장면",
+            "이미지",
+            "사진",
+            "문서",
+            "명함",
+            "화이트보드",
+        )
+        val visualActions = listOf(
+            "저장",
+            "기억",
+            "뭐",
+            "무엇",
+            "누구",
+            "어디",
+            "읽",
+            "요약",
+            "설명",
+            "해석",
+            "찾아",
+        )
+        return visualReferences.any { normalized.contains(it) } &&
+            visualActions.any { normalized.contains(it) }
     }
 
     fun clearError() {

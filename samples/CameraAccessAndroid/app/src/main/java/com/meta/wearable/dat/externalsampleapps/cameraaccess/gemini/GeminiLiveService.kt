@@ -165,6 +165,13 @@ class GeminiLiveService {
             val baos = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, GeminiConfig.VIDEO_JPEG_QUALITY, baos)
             val base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+            sendVideoFrameBase64(base64)
+        }
+    }
+
+    fun sendVideoFrameBase64(base64: String) {
+        if (_connectionState.value != GeminiConnectionState.Ready) return
+        sendExecutor.execute {
             val json = JSONObject().apply {
                 put("realtimeInput", JSONObject().apply {
                     put("video", JSONObject().apply {

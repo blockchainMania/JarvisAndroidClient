@@ -101,16 +101,18 @@ sealed class OpenClawConnectionState {
 
 // ─── Jarvis Tool Declarations (sent to Gemini at session setup) ──
 //
-// 8 typed functions that map 1:1 to Jarvis Memory API endpoints.
+// Typed functions that map 1:1 to Jarvis Memory API endpoints.
 // Type name `ToolDeclarations` is preserved for wiring compatibility.
 
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray = JSONArray()
+        .put(captureCurrentView())
         .put(savePerson())
         .put(searchPeople())
         .put(saveMeeting())
         .put(searchMeetings())
         .put(saveMemory())
+        .put(saveLifeMemory())
         .put(searchMemory())
         .put(saveNeed())
         .put(getProposalContext())
@@ -150,7 +152,15 @@ object ToolDeclarations {
         put("behavior", "BLOCKING")
     }
 
-    // ── 8 declarations ────────────────────────────────────────────
+    // ── declarations ──────────────────────────────────────────────
+    private fun captureCurrentView() = decl(
+        name = "capture_current_view",
+        description = "현재 사용자가 보고 있는 장면이 필요할 때 호출. 예: '이 재료가 뭔지 모르겠어', '앞에 있는 사람 누구야?', '이 문서 읽어줘', '이거 저장해줘'. 앱은 최신 카메라 프레임 1장을 현재 대화에 첨부합니다. 비디오를 계속 보내지 말고, 현재 시야가 필요할 때만 이 도구를 호출하세요.",
+        properties = JSONObject()
+            .put("reason", strProp("현재 시야가 필요한 이유. 예: '재료 식별', '명함 읽기', '장면 저장 전 해석'")),
+        required = listOf("reason"),
+    )
+
     private fun savePerson() = decl(
         name = "save_person",
         description = "사용자가 새 사람을 메모리에 저장하라고 할 때. 예: '이 사람 저장해줘', '방금 만난 박부장 등록'.",
@@ -208,6 +218,19 @@ object ToolDeclarations {
             .put("related_meeting_id", strProp("관련 미팅 UUID (선택)"))
             .put("source", enumProp("출처", listOf("camera", "voice", "manual", "derived"))),
         required = listOf("text", "captured_at"),
+    )
+
+    private fun saveLifeMemory() = decl(
+        name = "save_life_memory",
+        description = "일상 장면을 이미지와 함께 저장. 사용자가 '이거 저장해줘', '지금 보는 거 기억해'라고 하면 먼저 어떤 정보로 저장할지 짧게 물어보고, 사용자가 답하면 현재 장면에 대한 AI 해석과 사용자 메모를 함께 저장하세요. 이미지는 앱이 최신 카메라 프레임을 자동 첨부합니다.",
+        properties = JSONObject()
+            .put("captured_at", strProp("관측 시각 ISO 8601 UTC"))
+            .put("user_note", strProp("사용자가 저장하고 싶다고 말한 핵심 정보"))
+            .put("ai_interpretation", strProp("현재 이미지/상황을 AI가 해석한 설명. 장소, 물건, 사람, 맥락, 중요한 단서를 포함"))
+            .put("people_text", strProp("사용자가 말한 관련 사람 정보. 예: '김민수 팀장, 어제 미팅에서 만남' (선택)"))
+            .put("related_person_ids", arrStrProp("이미 알고 있는 관련 person UUID 목록 (선택)"))
+            .put("source", enumProp("출처", listOf("camera", "voice", "manual", "derived"))),
+        required = listOf("captured_at", "user_note", "ai_interpretation"),
     )
 
     private fun searchMemory() = decl(

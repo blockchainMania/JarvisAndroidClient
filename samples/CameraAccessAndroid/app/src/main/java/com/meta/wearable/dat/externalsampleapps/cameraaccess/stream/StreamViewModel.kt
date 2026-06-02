@@ -16,6 +16,7 @@ import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
@@ -43,6 +44,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,6 +58,9 @@ class StreamViewModel(
 
   companion object {
     private const val TAG = "StreamViewModel"
+    private const val GLASSES_START_TIMEOUT_MS = 12_000L
+    private const val GLASSES_FRAME_INTERVAL_MS = 250L
+    private const val GLASSES_FRAME_LOG_INTERVAL_MS = 5_000L
     private val INITIAL_STATE = StreamUiState()
   }
 
@@ -67,6 +72,11 @@ class StreamViewModel(
 
   private var videoJob: Job? = null
   private var stateJob: Job? = null
+  private var startTimeoutJob: Job? = null
+  private var isStreamingServiceRunning = false
+  private var hasReachedGlassesStreaming = false
+  private var lastGlassesFrameAt = 0L
+  private var lastGlassesFrameLogAt = 0L
 
   // VisionClaw additions
   var geminiViewModel: GeminiSessionViewModel? = null
@@ -74,31 +84,75 @@ class StreamViewModel(
   private var phoneCameraManager: PhoneCameraManager? = null
 
   fun startStream() {
-    videoJob?.cancel()
-    stateJob?.cancel()
+    stopActiveStream()
+    hasReachedGlassesStreaming = false
+    _uiState.update {
+      it.copy(
+        streamingMode = StreamingMode.GLASSES,
+        streamSessionState = StreamSessionState.STARTING,
+        errorMessage = null,
+      )
+    }
 
-    // Start foreground service to keep streaming alive in background / screen locked
-    StreamingService.start(getApplication())
-
+    Log.d(TAG, "Starting glasses stream session with LOW/15fps")
     val streamSession =
         Wearables.startStreamSession(
                 getApplication(),
                 deviceSelector,
-                StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
+                StreamConfiguration(videoQuality = VideoQuality.LOW, 15),
             )
             .also { streamSession = it }
     _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
     videoJob = viewModelScope.launch { streamSession.videoStream.collect { handleVideoFrame(it) } }
+    startTimeoutJob =
+        viewModelScope.launch {
+          delay(GLASSES_START_TIMEOUT_MS)
+          if (
+              _uiState.value.streamingMode == StreamingMode.GLASSES &&
+                  _uiState.value.streamSessionState != StreamSessionState.STREAMING
+          ) {
+            Log.w(TAG, "Glasses stream did not reach STREAMING before timeout")
+            stopActiveStream()
+            _uiState.update {
+              it.copy(
+                  streamingMode = StreamingMode.GLASSES,
+                  streamSessionState = StreamSessionState.STOPPED,
+                  errorMessage =
+                      "Glasses stream did not start. Reconnect the glasses/Meta AI app, then try Start Streaming again.",
+              )
+            }
+          }
+        }
     stateJob =
         viewModelScope.launch {
           streamSession.state.collect { currentState ->
             val prevState = _uiState.value.streamSessionState
+            Log.d(TAG, "Glasses stream state: $prevState -> $currentState")
             _uiState.update { it.copy(streamSessionState = currentState) }
 
-            // navigate back when state transitioned to STOPPED
-            if (currentState != prevState && currentState == StreamSessionState.STOPPED) {
-              stopStream()
-              wearablesViewModel.navigateToDeviceSelection()
+            if (currentState == StreamSessionState.STREAMING && !isStreamingServiceRunning) {
+              hasReachedGlassesStreaming = true
+              startTimeoutJob?.cancel()
+              startTimeoutJob = null
+              StreamingService.start(getApplication())
+              isStreamingServiceRunning = true
+            }
+
+            if (
+                currentState != prevState &&
+                    currentState == StreamSessionState.STOPPED &&
+                    hasReachedGlassesStreaming
+            ) {
+              _uiState.update {
+                it.copy(
+                  errorMessage =
+                      "Glasses video stream stopped. Check Bluetooth, Meta AI app connection, and camera permission.",
+                )
+              }
+              if (isStreamingServiceRunning) {
+                StreamingService.stop(getApplication())
+                isStreamingServiceRunning = false
+              }
             }
           }
         }
@@ -109,17 +163,22 @@ class StreamViewModel(
     phoneCameraManager = manager
 
     manager.onFrameCaptured = { bitmap ->
-      _uiState.update { it.copy(videoFrame = bitmap) }
+      _uiState.update { it.copy(videoFrame = bitmap, errorMessage = null) }
       // Forward to Gemini (throttled inside the VM)
       geminiViewModel?.sendVideoFrameIfThrottled(bitmap)
       // Forward to WebRTC (every frame)
       webrtcViewModel?.pushVideoFrame(bitmap)
+    }
+    manager.onError = { message ->
+      _uiState.update { it.copy(errorMessage = message) }
+      Log.e(TAG, message)
     }
 
     _uiState.update {
       it.copy(
         streamingMode = StreamingMode.PHONE,
         streamSessionState = StreamSessionState.STREAMING,
+        errorMessage = null,
       )
     }
     manager.start(lifecycleOwner)
@@ -127,8 +186,18 @@ class StreamViewModel(
   }
 
   fun stopStream() {
-    // Stop foreground service
-    StreamingService.stop(getApplication())
+    stopActiveStream()
+    _uiState.update { INITIAL_STATE }
+  }
+
+  private fun stopActiveStream() {
+    startTimeoutJob?.cancel()
+    startTimeoutJob = null
+
+    if (isStreamingServiceRunning) {
+      StreamingService.stop(getApplication())
+      isStreamingServiceRunning = false
+    }
 
     videoJob?.cancel()
     videoJob = null
@@ -138,7 +207,8 @@ class StreamViewModel(
     streamSession = null
     phoneCameraManager?.stop()
     phoneCameraManager = null
-    _uiState.update { INITIAL_STATE }
+    lastGlassesFrameAt = 0L
+    lastGlassesFrameLogAt = 0L
   }
 
   fun capturePhoto() {
@@ -214,6 +284,17 @@ class StreamViewModel(
   }
 
   private fun handleVideoFrame(videoFrame: VideoFrame) {
+    val now = SystemClock.elapsedRealtime()
+    if (now - lastGlassesFrameAt < GLASSES_FRAME_INTERVAL_MS) {
+      return
+    }
+    lastGlassesFrameAt = now
+
+    if (now - lastGlassesFrameLogAt >= GLASSES_FRAME_LOG_INTERVAL_MS) {
+      Log.d(TAG, "Glasses frame ${videoFrame.width}x${videoFrame.height}")
+      lastGlassesFrameLogAt = now
+    }
+
     // VideoFrame contains raw I420 video data in a ByteBuffer
     val buffer = videoFrame.buffer
     val dataSize = buffer.remaining()
@@ -239,7 +320,7 @@ class StreamViewModel(
 
     // Forward to Gemini (throttled inside the VM)
     geminiViewModel?.sendVideoFrameIfThrottled(bitmap)
-    // Forward to WebRTC (every frame)
+    // Forward to WebRTC only after the glasses frame rate is reduced above.
     webrtcViewModel?.pushVideoFrame(bitmap)
   }
 

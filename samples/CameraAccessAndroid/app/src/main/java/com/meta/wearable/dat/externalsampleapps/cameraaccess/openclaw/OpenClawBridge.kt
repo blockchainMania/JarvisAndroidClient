@@ -110,6 +110,28 @@ class OpenClawBridge {
                         pick(args, "text", "captured_at", "related_person_ids",
                                    "related_meeting_id", "source")
                     )
+                    "save_life_memory" -> {
+                        val body = pick(
+                            args,
+                            "captured_at",
+                            "user_note",
+                            "ai_interpretation",
+                            "people_text",
+                            "related_person_ids",
+                            "source",
+                        )
+                        VisualMemoryFrameStore.latestBase64()?.let { imageBase64 ->
+                            body.put("image_base64", imageBase64)
+                            body.put("image_mime_type", "image/jpeg")
+                            body.put(
+                                "metadata",
+                                JSONObject()
+                                    .put("frame_captured_at_ms", VisualMemoryFrameStore.latestCapturedAtMs())
+                                    .put("source_device", "meta_rayban_or_phone_camera")
+                            )
+                        }
+                        post("/memory/life/save", body)
+                    }
                     "search_memory" -> post(
                         "/memory/search",
                         pick(args, "query", "top_k", "time_from", "time_to", "person_id")

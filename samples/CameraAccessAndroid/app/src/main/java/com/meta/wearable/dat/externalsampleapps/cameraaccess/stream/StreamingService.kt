@@ -69,7 +69,8 @@ class StreamingService : Service() {
       startForeground(
           NOTIFICATION_ID,
           notification,
-          ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+          ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+              ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
       )
     } else {
       startForeground(NOTIFICATION_ID, notification)
@@ -77,7 +78,7 @@ class StreamingService : Service() {
 
     acquireWakeLock()
 
-    return START_STICKY
+    return START_NOT_STICKY
   }
 
   override fun onDestroy() {
