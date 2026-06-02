@@ -69,7 +69,7 @@ GitHub token은 Meta DAT Android SDK를 GitHub Packages에서 받기 위해 필�
 Android Studio에서 아래 폴더를 프로젝트로 엽니다.
 
 ```bash
-~/Desktop/develop/VisionClaw/samples/CameraAccessAndroid
+~/Desktop/develop/JarvisAndroidClient/samples/CameraAccessAndroid
 ```
 
 `local.properties`에 GitHub token을 넣습니다.
