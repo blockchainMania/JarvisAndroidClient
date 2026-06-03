@@ -170,6 +170,14 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     _uiState.update { it.copy(isSettingsVisible = false) }
   }
 
+  fun showMemory() {
+    _uiState.update { it.copy(isMemoryVisible = true) }
+  }
+
+  fun hideMemory() {
+    _uiState.update { it.copy(isMemoryVisible = false) }
+  }
+
   fun showDebugMenu() {
     _uiState.update { it.copy(isDebugMenuVisible = true) }
   }

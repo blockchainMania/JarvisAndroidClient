@@ -223,6 +223,7 @@ class GeminiSessionViewModel : ViewModel() {
 
         val now = System.currentTimeMillis()
         if (now - lastOnDemandVisualContextAt < 3_000L) return
+        if (!VisualMemoryFrameStore.isLatestFresh()) return
         val latestFrame = VisualMemoryFrameStore.latestBase64() ?: return
 
         visualContextSentForTurn = true
@@ -239,6 +240,17 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     private fun captureCurrentView(call: GeminiFunctionCall): ToolResult {
+        val ageMs = VisualMemoryFrameStore.latestAgeMs()
+        if (ageMs == null) {
+            return ToolResult.Failure(
+                "No camera frame is available yet. Ask the user to start camera streaming, then retry."
+            )
+        }
+        if (!VisualMemoryFrameStore.isLatestFresh()) {
+            return ToolResult.Failure(
+                "The latest camera frame is ${ageMs}ms old, so it may not match what the user is seeing now. Ask the user to hold still for a moment and try again before saving or answering."
+            )
+        }
         val latestFrame = VisualMemoryFrameStore.latestBase64()
             ?: return ToolResult.Failure(
                 "No camera frame is available yet. Ask the user to start camera streaming, then retry."
@@ -251,7 +263,7 @@ class GeminiSessionViewModel : ViewModel() {
         val reason = call.args["reason"]?.toString() ?: "current visual context"
         Log.d(TAG, "capture_current_view sent one frame, reason=$reason")
         return ToolResult.Success(
-            "Attached one current camera frame to this conversation. Use the image to answer the user's visual question or to fill ai_interpretation before saving. reason=$reason"
+            "Attached one fresh camera frame (${ageMs}ms old) to this conversation. Use the image to answer the user's visual question or to fill ai_interpretation before saving. reason=$reason"
         )
     }
 

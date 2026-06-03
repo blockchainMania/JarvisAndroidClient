@@ -81,6 +81,10 @@ fun CameraAccessScaffold(
   Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     Box(modifier = Modifier.fillMaxSize()) {
       when {
+        uiState.isMemoryVisible ->
+            MemoryScreen(
+                onBack = { viewModel.hideMemory() },
+            )
         uiState.isSettingsVisible ->
             SettingsScreen(
                 onBack = { viewModel.hideSettings() },

@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream
 
 object VisualMemoryFrameStore {
     private const val JPEG_QUALITY = 70
+    private const val MAX_FRESH_FRAME_AGE_MS = 2_000L
 
     @Volatile
     private var latestJpeg: ByteArray? = null
@@ -26,4 +27,14 @@ object VisualMemoryFrameStore {
     }
 
     fun latestCapturedAtMs(): Long = latestCapturedAtMs
+
+    fun latestAgeMs(nowMs: Long = System.currentTimeMillis()): Long? {
+        if (latestJpeg == null || latestCapturedAtMs == 0L) return null
+        return nowMs - latestCapturedAtMs
+    }
+
+    fun isLatestFresh(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val ageMs = latestAgeMs(nowMs) ?: return false
+        return ageMs <= MAX_FRESH_FRAME_AGE_MS
+    }
 }

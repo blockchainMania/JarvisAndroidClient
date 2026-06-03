@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DropdownMenu
@@ -88,6 +89,15 @@ fun NonStreamScreen(
           modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding(),
           horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
+        IconButton(onClick = { viewModel.showMemory() }) {
+          Icon(
+              imageVector = Icons.Default.History,
+              contentDescription = "Memory",
+              tint = Color.White,
+              modifier = Modifier.size(28.dp),
+          )
+        }
+
         IconButton(onClick = { viewModel.showSettings() }) {
           Icon(
               imageVector = Icons.Default.Settings,

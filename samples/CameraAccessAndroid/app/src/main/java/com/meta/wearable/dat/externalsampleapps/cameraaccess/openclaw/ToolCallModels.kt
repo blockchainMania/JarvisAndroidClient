@@ -222,7 +222,7 @@ object ToolDeclarations {
 
     private fun saveLifeMemory() = decl(
         name = "save_life_memory",
-        description = "일상 장면을 이미지와 함께 저장. 사용자가 '이거 저장해줘', '지금 보는 거 기억해'라고 하면 먼저 어떤 정보로 저장할지 짧게 물어보고, 사용자가 답하면 현재 장면에 대한 AI 해석과 사용자 메모를 함께 저장하세요. 이미지는 앱이 최신 카메라 프레임을 자동 첨부합니다.",
+        description = "일상 장면을 이미지와 함께 저장. 저장 전에는 반드시 capture_current_view로 현재 장면을 확인하고, 보이는 내용을 설명한 뒤 '이 내용으로 저장하면 될까요?'라고 사용자 확인을 받으세요. 사용자가 승인하면 현재 장면에 대한 AI 해석과 사용자 메모를 함께 저장하세요. 이미지는 앱이 최신 카메라 프레임을 자동 첨부합니다.",
         properties = JSONObject()
             .put("captured_at", strProp("관측 시각 ISO 8601 UTC"))
             .put("user_note", strProp("사용자가 저장하고 싶다고 말한 핵심 정보"))

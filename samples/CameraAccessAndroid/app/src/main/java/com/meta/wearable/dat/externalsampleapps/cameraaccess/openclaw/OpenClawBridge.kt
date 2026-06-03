@@ -120,16 +120,26 @@ class OpenClawBridge {
                             "related_person_ids",
                             "source",
                         )
-                        VisualMemoryFrameStore.latestBase64()?.let { imageBase64 ->
-                            body.put("image_base64", imageBase64)
-                            body.put("image_mime_type", "image/jpeg")
-                            body.put(
-                                "metadata",
-                                JSONObject()
-                                    .put("frame_captured_at_ms", VisualMemoryFrameStore.latestCapturedAtMs())
-                                    .put("source_device", "meta_rayban_or_phone_camera")
+                        val latestFrameAgeMs = VisualMemoryFrameStore.latestAgeMs()
+                            ?: return@withContext ToolResult.Failure(
+                                "No fresh camera frame is available. Ask the user to start the camera and try saving again."
+                            )
+                        if (!VisualMemoryFrameStore.isLatestFresh()) {
+                            return@withContext ToolResult.Failure(
+                                "The latest camera frame is ${latestFrameAgeMs}ms old. Ask the user to hold still for a moment and try saving again."
                             )
                         }
+                        val imageBase64 = VisualMemoryFrameStore.latestBase64()
+                            ?: return@withContext ToolResult.Failure("No camera frame is available.")
+                        body.put("image_base64", imageBase64)
+                        body.put("image_mime_type", "image/jpeg")
+                        body.put(
+                            "metadata",
+                            JSONObject()
+                                .put("frame_captured_at_ms", VisualMemoryFrameStore.latestCapturedAtMs())
+                                .put("frame_age_ms_at_save", latestFrameAgeMs)
+                                .put("source_device", "meta_rayban_or_phone_camera")
+                        )
                         post("/memory/life/save", body)
                     }
                     "search_memory" -> post(

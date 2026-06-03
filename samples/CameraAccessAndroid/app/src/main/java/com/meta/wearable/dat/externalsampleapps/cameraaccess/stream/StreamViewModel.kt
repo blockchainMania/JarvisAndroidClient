@@ -44,12 +44,16 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class StreamViewModel(
     application: Application,
@@ -59,7 +63,7 @@ class StreamViewModel(
   companion object {
     private const val TAG = "StreamViewModel"
     private const val GLASSES_START_TIMEOUT_MS = 12_000L
-    private const val GLASSES_FRAME_INTERVAL_MS = 250L
+    private const val GLASSES_FRAME_INTERVAL_MS = 100L
     private const val GLASSES_FRAME_LOG_INTERVAL_MS = 5_000L
     private val INITIAL_STATE = StreamUiState()
   }
@@ -103,7 +107,12 @@ class StreamViewModel(
             )
             .also { streamSession = it }
     _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
-    videoJob = viewModelScope.launch { streamSession.videoStream.collect { handleVideoFrame(it) } }
+    videoJob =
+        viewModelScope.launch {
+          streamSession.videoStream
+              .conflate()
+              .collectLatest { handleVideoFrame(it) }
+        }
     startTimeoutJob =
         viewModelScope.launch {
           delay(GLASSES_START_TIMEOUT_MS)
@@ -283,7 +292,7 @@ class StreamViewModel(
     }
   }
 
-  private fun handleVideoFrame(videoFrame: VideoFrame) {
+  private suspend fun handleVideoFrame(videoFrame: VideoFrame) {
     val now = SystemClock.elapsedRealtime()
     if (now - lastGlassesFrameAt < GLASSES_FRAME_INTERVAL_MS) {
       return
@@ -306,22 +315,32 @@ class StreamViewModel(
     // Restore position
     buffer.position(originalPosition)
 
-    // Convert I420 to NV21 format which is supported by Android's YuvImage
-    val nv21 = convertI420toNV21(byteArray, videoFrame.width, videoFrame.height)
-    val image = YuvImage(nv21, ImageFormat.NV21, videoFrame.width, videoFrame.height, null)
-    val out =
-        ByteArrayOutputStream().use { stream ->
-          image.compressToJpeg(Rect(0, 0, videoFrame.width, videoFrame.height), 50, stream)
-          stream.toByteArray()
-        }
-
-    val bitmap = BitmapFactory.decodeByteArray(out, 0, out.size)
+    val bitmap = withContext(Dispatchers.Default) {
+      decodeI420FrameToBitmap(byteArray, videoFrame.width, videoFrame.height)
+    } ?: return
     _uiState.update { it.copy(videoFrame = bitmap) }
 
     // Forward to Gemini (throttled inside the VM)
     geminiViewModel?.sendVideoFrameIfThrottled(bitmap)
     // Forward to WebRTC only after the glasses frame rate is reduced above.
     webrtcViewModel?.pushVideoFrame(bitmap)
+  }
+
+  private fun decodeI420FrameToBitmap(byteArray: ByteArray, width: Int, height: Int): Bitmap? {
+    return try {
+      // Convert I420 to NV21 format which is supported by Android's YuvImage.
+      val nv21 = convertI420toNV21(byteArray, width, height)
+      val image = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+      val out =
+          ByteArrayOutputStream().use { stream ->
+            image.compressToJpeg(Rect(0, 0, width, height), 45, stream)
+            stream.toByteArray()
+          }
+      BitmapFactory.decodeByteArray(out, 0, out.size)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to decode glasses video frame: ${e.message}", e)
+      null
+    }
   }
 
   // Convert I420 (YYYYYYYY:UUVV) to NV21 (YYYYYYYY:VUVU)

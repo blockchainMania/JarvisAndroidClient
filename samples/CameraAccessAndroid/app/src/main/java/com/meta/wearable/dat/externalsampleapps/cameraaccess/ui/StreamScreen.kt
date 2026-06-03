@@ -20,7 +20,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -170,6 +174,17 @@ fun StreamScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     WebRTCOverlay(uiState = webrtcUiState)
                 }
+            }
+
+            IconButton(
+                onClick = { wearablesViewModel.showMemory() },
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.History,
+                    contentDescription = "Memory",
+                    tint = androidx.compose.ui.graphics.Color.White,
+                )
             }
 
             // Controls at bottom
