@@ -53,7 +53,14 @@ object SettingsManager {
         set(value) = prefs.edit().putString("openClawGatewayToken", value).apply()
 
     var jarvisApiBase: String
-        get() = prefs.getString("jarvisApiBase", null) ?: Secrets.jarvisApiBase
+        get() {
+            val raw = prefs.getString("jarvisApiBase", null) ?: Secrets.jarvisApiBase
+            return if (raw.contains(".local") && !Secrets.jarvisApiBase.contains(".local")) {
+                Secrets.jarvisApiBase
+            } else {
+                raw
+            }
+        }
         set(value) = prefs.edit().putString("jarvisApiBase", value).apply()
 
     var jarvisApiKey: String
@@ -63,7 +70,14 @@ object SettingsManager {
     var webrtcSignalingURL: String
         get() {
             val raw = prefs.getString("webrtcSignalingURL", null) ?: Secrets.webrtcSignalingURL
-            return if (raw.contains("YOUR_SIGNALING_SERVER")) "" else raw
+            return if (
+                raw.contains("YOUR_SIGNALING_SERVER") ||
+                    (raw.contains(".local") && !Secrets.jarvisApiBase.contains(".local"))
+            ) {
+                ""
+            } else {
+                raw
+            }
         }
         set(value) = prefs.edit().putString("webrtcSignalingURL", value).apply()
 
