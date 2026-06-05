@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +30,8 @@ fun ControlsRow(
     isAIActive: Boolean,
     onToggleLive: () -> Unit,
     isLiveActive: Boolean,
+    onShareLive: () -> Unit,
+    canShareLive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -69,18 +73,37 @@ fun ControlsRow(
         // Live toggle button
         Button(
             onClick = onToggleLive,
-            modifier = Modifier.aspectRatio(1f),
+            modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (isLiveActive) AppColor.Red else AppColor.DeepBlue,
             ),
-            shape = CircleShape,
-            contentPadding = PaddingValues(0.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.Videocam,
                 contentDescription = if (isLiveActive) "Stop Live" else "Start Live",
                 tint = Color.White,
             )
+            Text(
+                text = if (isLiveActive) "Stop Live" else "Live",
+                color = Color.White,
+            )
+        }
+
+        if (canShareLive) {
+            Button(
+                onClick = onShareLive,
+                modifier = Modifier.aspectRatio(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = AppColor.Green),
+                shape = CircleShape,
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.IosShare,
+                    contentDescription = "Share Live",
+                    tint = Color.White,
+                )
+            }
         }
     }
 }

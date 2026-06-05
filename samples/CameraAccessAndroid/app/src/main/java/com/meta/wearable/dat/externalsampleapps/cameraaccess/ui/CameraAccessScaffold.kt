@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Error
@@ -79,6 +80,13 @@ fun CameraAccessScaffold(
   }
 
   Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    BackHandler(enabled = uiState.isMemoryVisible) {
+      viewModel.hideMemory()
+    }
+    BackHandler(enabled = uiState.isSettingsVisible) {
+      viewModel.hideSettings()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
       when {
         uiState.isMemoryVisible ->

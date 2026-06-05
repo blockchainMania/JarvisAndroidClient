@@ -8,7 +8,9 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Image
@@ -70,6 +72,17 @@ fun StreamScreen(
     val webrtcUiState by webrtcViewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
+
+    fun leaveStream() {
+        if (geminiUiState.isGeminiActive) geminiViewModel.stopSession()
+        if (webrtcUiState.isActive) webrtcViewModel.stopSession()
+        streamViewModel.stopStream()
+        wearablesViewModel.navigateToDeviceSelection()
+    }
+
+    BackHandler {
+        leaveStream()
+    }
 
     // Wire Gemini VM to Stream VM for frame forwarding
     LaunchedEffect(geminiViewModel) {
@@ -190,10 +203,7 @@ fun StreamScreen(
             // Controls at bottom
             ControlsRow(
                 onStopStream = {
-                    if (geminiUiState.isGeminiActive) geminiViewModel.stopSession()
-                    if (webrtcUiState.isActive) webrtcViewModel.stopSession()
-                    streamViewModel.stopStream()
-                    wearablesViewModel.navigateToDeviceSelection()
+                    leaveStream()
                 },
                 onCapturePhoto = { streamViewModel.capturePhoto() },
                 onToggleAI = {
@@ -212,6 +222,14 @@ fun StreamScreen(
                     }
                 },
                 isLiveActive = webrtcUiState.isActive,
+                onShareLive = {
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, "Jarvis live view: ${webrtcUiState.viewerUrl}")
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share live view"))
+                },
+                canShareLive = webrtcUiState.viewerUrl.isNotEmpty(),
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
