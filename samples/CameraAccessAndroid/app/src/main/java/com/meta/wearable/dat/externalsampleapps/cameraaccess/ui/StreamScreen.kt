@@ -130,6 +130,11 @@ fun StreamScreen(
             webrtcViewModel.clearError()
         }
     }
+    LaunchedEffect(webrtcUiState.viewerUrl) {
+        if (webrtcUiState.viewerUrl.isNotEmpty()) {
+            Toast.makeText(context, "Live link ready. Tap Share.", Toast.LENGTH_SHORT).show()
+        }
+    }
     LaunchedEffect(streamUiState.errorMessage) {
         streamUiState.errorMessage?.let { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()

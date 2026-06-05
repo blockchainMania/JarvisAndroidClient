@@ -31,18 +31,19 @@ object WebRTCConfig {
     val signalingServerURL: String
         get() {
             val configured = SettingsManager.webrtcSignalingURL.trim()
-            if (
-                configured.isNotBlank() &&
-                    configured != "wss://YOUR_SIGNALING_SERVER" &&
-                    configured != "ws://YOUR_SIGNALING_SERVER"
-            ) {
+            if (isUsableSignalingUrl(configured)) {
                 return configured
             }
             return "${liveBaseUrl().replaceFirst("https://", "wss://").replaceFirst("http://", "ws://")}/ws"
         }
 
     val isConfigured: Boolean
-        get() = signalingServerURL.startsWith("wss://") || signalingServerURL.startsWith("ws://")
+        get() {
+            val url = signalingServerURL
+            return (url.startsWith("wss://") || url.startsWith("ws://")) &&
+                !url.contains("YOUR_HOST") &&
+                !url.contains("YOUR_SIGNALING_SERVER")
+        }
 
     fun viewerUrl(roomCode: String): String {
         val encoded = URLEncoder.encode(roomCode, StandardCharsets.UTF_8.name())
@@ -50,6 +51,13 @@ object WebRTCConfig {
     }
 
     private fun liveBaseUrl(): String = "${GeminiConfig.jarvisApiBase.trimEnd('/')}/live"
+
+    private fun isUsableSignalingUrl(url: String): Boolean {
+        if (url.isBlank()) return false
+        if (url.contains("YOUR_SIGNALING_SERVER")) return false
+        if (url.contains("YOUR_HOST")) return false
+        return url.startsWith("wss://") || url.startsWith("ws://")
+    }
 
     /**
      * Fetch TURN credentials from the credential server, falling back to STUN-only if unavailable.

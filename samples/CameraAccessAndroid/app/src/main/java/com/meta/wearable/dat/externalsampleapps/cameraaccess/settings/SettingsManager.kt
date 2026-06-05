@@ -61,7 +61,10 @@ object SettingsManager {
         set(value) = prefs.edit().putString("jarvisApiKey", value).apply()
 
     var webrtcSignalingURL: String
-        get() = prefs.getString("webrtcSignalingURL", null) ?: Secrets.webrtcSignalingURL
+        get() {
+            val raw = prefs.getString("webrtcSignalingURL", null) ?: Secrets.webrtcSignalingURL
+            return if (raw.contains("YOUR_SIGNALING_SERVER")) "" else raw
+        }
         set(value) = prefs.edit().putString("webrtcSignalingURL", value).apply()
 
     var videoStreamingEnabled: Boolean
