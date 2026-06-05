@@ -151,7 +151,7 @@ fun SettingsScreen(
                 value = webrtcSignalingURL,
                 onValueChange = { webrtcSignalingURL = it },
                 label = "Signaling URL",
-                placeholder = "wss://your-server.example.com",
+                placeholder = "Auto: Jarvis API /live/ws",
                 keyboardType = KeyboardType.Uri,
             )
 

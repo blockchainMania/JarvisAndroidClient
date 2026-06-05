@@ -3,6 +3,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.memory
 data class MemoryItem(
     val id: String,
     val capturedAt: String,
+    val capturedAtDisplay: String,
     val text: String,
     val userNote: String?,
     val aiInterpretation: String?,

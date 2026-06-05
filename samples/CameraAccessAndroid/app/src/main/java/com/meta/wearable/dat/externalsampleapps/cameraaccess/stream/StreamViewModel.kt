@@ -35,6 +35,7 @@ import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.VisualMemoryFrameStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.PhoneCameraManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
@@ -98,12 +99,13 @@ class StreamViewModel(
       )
     }
 
-    Log.d(TAG, "Starting glasses stream session with LOW/15fps")
+    VisualMemoryFrameStore.freshStillProvider = ::captureFreshVisualFrame
+    Log.d(TAG, "Starting glasses stream session with HIGH/30fps")
     val streamSession =
         Wearables.startStreamSession(
                 getApplication(),
                 deviceSelector,
-                StreamConfiguration(videoQuality = VideoQuality.LOW, 15),
+                StreamConfiguration(videoQuality = VideoQuality.HIGH, 30),
             )
             .also { streamSession = it }
     _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
@@ -170,6 +172,7 @@ class StreamViewModel(
   fun startPhoneCamera(lifecycleOwner: LifecycleOwner) {
     val manager = PhoneCameraManager(getApplication())
     phoneCameraManager = manager
+    VisualMemoryFrameStore.freshStillProvider = ::captureFreshVisualFrame
 
     manager.onFrameCaptured = { bitmap ->
       _uiState.update { it.copy(videoFrame = bitmap, errorMessage = null) }
@@ -216,6 +219,7 @@ class StreamViewModel(
     streamSession = null
     phoneCameraManager?.stop()
     phoneCameraManager = null
+    VisualMemoryFrameStore.freshStillProvider = null
     lastGlassesFrameAt = 0L
     lastGlassesFrameLogAt = 0L
   }
@@ -326,6 +330,26 @@ class StreamViewModel(
     webrtcViewModel?.pushVideoFrame(bitmap)
   }
 
+  private suspend fun captureFreshVisualFrame(): VisualMemoryFrameStore.VisualFrame? {
+    return when (_uiState.value.streamingMode) {
+      StreamingMode.PHONE -> {
+        _uiState.value.videoFrame?.let {
+          VisualMemoryFrameStore.bitmapToVisualFrame(it, "phone_camera_still")
+        }
+      }
+      StreamingMode.GLASSES -> {
+        try {
+          val photoData = streamSession?.capturePhoto()?.getOrNull() ?: return null
+          val bitmap = withContext(Dispatchers.Default) { photoDataToBitmap(photoData) }
+          VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "glasses_capture_photo")
+        } catch (e: Exception) {
+          Log.w(TAG, "Fresh glasses photo capture failed, falling back to latest frame: ${e.message}")
+          null
+        }
+      }
+    }
+  }
+
   private fun decodeI420FrameToBitmap(byteArray: ByteArray, width: Int, height: Int): Bitmap? {
     return try {
       // Convert I420 to NV21 format which is supported by Android's YuvImage.
@@ -359,21 +383,23 @@ class StreamViewModel(
   }
 
   private fun handlePhotoData(photo: PhotoData) {
-    val capturedPhoto =
-        when (photo) {
-          is PhotoData.Bitmap -> photo.bitmap
-          is PhotoData.HEIC -> {
-            val byteArray = ByteArray(photo.data.remaining())
-            photo.data.get(byteArray)
-
-            // Extract EXIF transformation matrix and apply to bitmap
-            val exifInfo = getExifInfo(byteArray)
-            val transform = getTransform(exifInfo)
-            decodeHeic(byteArray, transform)
-          }
-        }
+    val capturedPhoto = photoDataToBitmap(photo)
     _uiState.update { it.copy(capturedPhoto = capturedPhoto, isShareDialogVisible = true) }
   }
+
+  private fun photoDataToBitmap(photo: PhotoData): Bitmap =
+      when (photo) {
+        is PhotoData.Bitmap -> photo.bitmap
+        is PhotoData.HEIC -> {
+          val byteArray = ByteArray(photo.data.remaining())
+          photo.data.get(byteArray)
+
+          // Extract EXIF transformation matrix and apply to bitmap.
+          val exifInfo = getExifInfo(byteArray)
+          val transform = getTransform(exifInfo)
+          decodeHeic(byteArray, transform)
+        }
+      }
 
   // HEIC Decoding with EXIF transformation
   private fun decodeHeic(heicBytes: ByteArray, transform: Matrix): Bitmap {

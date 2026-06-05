@@ -1,7 +1,10 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc
 
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -26,10 +29,27 @@ object WebRTCConfig {
     private const val TURN_CREDENTIALS_URL = "https://visionclaw-turn-creds.fly.dev/credentials"
 
     val signalingServerURL: String
-        get() = SettingsManager.webrtcSignalingURL
+        get() {
+            val configured = SettingsManager.webrtcSignalingURL.trim()
+            if (
+                configured.isNotBlank() &&
+                    configured != "wss://YOUR_SIGNALING_SERVER" &&
+                    configured != "ws://YOUR_SIGNALING_SERVER"
+            ) {
+                return configured
+            }
+            return "${liveBaseUrl().replaceFirst("https://", "wss://").replaceFirst("http://", "ws://")}/ws"
+        }
 
     val isConfigured: Boolean
-        get() = signalingServerURL.isNotBlank() && signalingServerURL.startsWith("wss://")
+        get() = signalingServerURL.startsWith("wss://") || signalingServerURL.startsWith("ws://")
+
+    fun viewerUrl(roomCode: String): String {
+        val encoded = URLEncoder.encode(roomCode, StandardCharsets.UTF_8.name())
+        return "${liveBaseUrl().replaceFirst("ws://", "http://").replaceFirst("wss://", "https://")}/watch?room=$encoded"
+    }
+
+    private fun liveBaseUrl(): String = "${GeminiConfig.jarvisApiBase.trimEnd('/')}/live"
 
     /**
      * Fetch TURN credentials from the credential server, falling back to STUN-only if unavailable.

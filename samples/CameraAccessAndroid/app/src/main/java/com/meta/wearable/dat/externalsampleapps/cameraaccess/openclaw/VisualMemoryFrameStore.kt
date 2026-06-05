@@ -6,13 +6,24 @@ import java.io.ByteArrayOutputStream
 
 object VisualMemoryFrameStore {
     private const val JPEG_QUALITY = 70
+    private const val STILL_JPEG_QUALITY = 88
     private const val MAX_FRESH_FRAME_AGE_MS = 2_000L
+
+    data class VisualFrame(
+        val base64: String,
+        val capturedAtMs: Long,
+        val ageMs: Long,
+        val source: String,
+    )
 
     @Volatile
     private var latestJpeg: ByteArray? = null
 
     @Volatile
     private var latestCapturedAtMs: Long = 0L
+
+    @Volatile
+    var freshStillProvider: (suspend () -> VisualFrame?)? = null
 
     fun update(bitmap: Bitmap) {
         val output = ByteArrayOutputStream()
@@ -36,5 +47,31 @@ object VisualMemoryFrameStore {
     fun isLatestFresh(nowMs: Long = System.currentTimeMillis()): Boolean {
         val ageMs = latestAgeMs(nowMs) ?: return false
         return ageMs <= MAX_FRESH_FRAME_AGE_MS
+    }
+
+    suspend fun captureFreshVisual(): VisualFrame? {
+        freshStillProvider?.invoke()?.let { return it }
+        val nowMs = System.currentTimeMillis()
+        val jpeg = latestJpeg ?: return null
+        val ageMs = latestAgeMs(nowMs) ?: return null
+        if (ageMs > MAX_FRESH_FRAME_AGE_MS) return null
+        return VisualFrame(
+            base64 = Base64.encodeToString(jpeg, Base64.NO_WRAP),
+            capturedAtMs = latestCapturedAtMs,
+            ageMs = ageMs,
+            source = "latest_video_frame",
+        )
+    }
+
+    fun bitmapToVisualFrame(bitmap: Bitmap, source: String): VisualFrame {
+        val output = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, STILL_JPEG_QUALITY, output)
+        val capturedAtMs = System.currentTimeMillis()
+        return VisualFrame(
+            base64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP),
+            capturedAtMs = capturedAtMs,
+            ageMs = 0L,
+            source = source,
+        )
     }
 }

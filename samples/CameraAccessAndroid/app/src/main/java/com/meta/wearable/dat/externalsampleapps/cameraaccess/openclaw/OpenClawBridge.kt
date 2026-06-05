@@ -8,6 +8,9 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
 import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +52,9 @@ class OpenClawBridge {
     private val jsonMediaType = "application/json".toMediaType()
 
     private fun baseUrl(): String = GeminiConfig.jarvisApiBase.trimEnd('/')
+
+    private fun nowKstIso(): String =
+        ZonedDateTime.now(ZoneId.of("Asia/Seoul")).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
 
     // ─── Connection check (used by UI badge) ─────────────────────
     suspend fun checkConnection() = withContext(Dispatchers.IO) {
@@ -113,31 +119,27 @@ class OpenClawBridge {
                     "save_life_memory" -> {
                         val body = pick(
                             args,
-                            "captured_at",
                             "user_note",
                             "ai_interpretation",
                             "people_text",
                             "related_person_ids",
                             "source",
                         )
-                        val latestFrameAgeMs = VisualMemoryFrameStore.latestAgeMs()
+                        val capturedAtKst = nowKstIso()
+                        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
                             ?: return@withContext ToolResult.Failure(
-                                "No fresh camera frame is available. Ask the user to start the camera and try saving again."
+                                "No fresh camera image is available. Ask the user to hold still for a moment and try saving again."
                             )
-                        if (!VisualMemoryFrameStore.isLatestFresh()) {
-                            return@withContext ToolResult.Failure(
-                                "The latest camera frame is ${latestFrameAgeMs}ms old. Ask the user to hold still for a moment and try saving again."
-                            )
-                        }
-                        val imageBase64 = VisualMemoryFrameStore.latestBase64()
-                            ?: return@withContext ToolResult.Failure("No camera frame is available.")
-                        body.put("image_base64", imageBase64)
+                        body.put("captured_at", capturedAtKst)
+                        body.put("image_base64", visualFrame.base64)
                         body.put("image_mime_type", "image/jpeg")
                         body.put(
                             "metadata",
                             JSONObject()
-                                .put("frame_captured_at_ms", VisualMemoryFrameStore.latestCapturedAtMs())
-                                .put("frame_age_ms_at_save", latestFrameAgeMs)
+                                .put("captured_at_kst", capturedAtKst)
+                                .put("frame_captured_at_ms", visualFrame.capturedAtMs)
+                                .put("frame_age_ms_at_save", visualFrame.ageMs)
+                                .put("visual_source", visualFrame.source)
                                 .put("source_device", "meta_rayban_or_phone_camera")
                         )
                         post("/memory/life/save", body)

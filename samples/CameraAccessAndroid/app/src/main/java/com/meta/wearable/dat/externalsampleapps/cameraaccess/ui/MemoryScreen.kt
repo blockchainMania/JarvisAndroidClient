@@ -1,9 +1,12 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,15 +32,22 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.MemoryItem
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.MemoryRepository
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.MemoryViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -142,8 +152,9 @@ private fun MemoryCard(memory: MemoryItem, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            MemoryThumbnail(filename = memory.imageFilename)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = {}, label = { Text(memory.capturedAt.take(16)) })
+                AssistChip(onClick = {}, label = { Text(memory.capturedAtDisplay) })
                 if (memory.imageFilename != null) {
                     AssistChip(onClick = {}, label = { Text("image") })
                 }
@@ -174,5 +185,24 @@ private fun MemoryCard(memory: MemoryItem, modifier: Modifier = Modifier) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun MemoryThumbnail(filename: String?) {
+    if (filename == null) return
+    val repository = remember { MemoryRepository() }
+    val bitmap by produceState<Bitmap?>(initialValue = null, filename) {
+        value = withContext(Dispatchers.IO) { repository.loadImage(filename) }
+    }
+    bitmap?.let {
+        Image(
+            bitmap = it.asImageBitmap(),
+            contentDescription = "Memory image",
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f),
+            contentScale = ContentScale.Crop,
+        )
     }
 }

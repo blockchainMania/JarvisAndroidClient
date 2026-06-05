@@ -32,6 +32,7 @@ data class WebRTCUiState(
     val isActive: Boolean = false,
     val connectionState: WebRTCConnectionState = WebRTCConnectionState.Disconnected,
     val roomCode: String = "",
+    val viewerUrl: String = "",
     val isMuted: Boolean = false,
     val errorMessage: String? = null,
     val remoteVideoTrack: VideoTrack? = null,
@@ -197,6 +198,7 @@ class WebRTCSessionViewModel(application: Application) : AndroidViewModel(applic
             is SignalingMessage.RoomCreated -> {
                 _uiState.value = _uiState.value.copy(
                     roomCode = message.room,
+                    viewerUrl = WebRTCConfig.viewerUrl(message.room),
                     connectionState = WebRTCConnectionState.WaitingForPeer,
                 )
                 savedRoomCode = message.room
@@ -205,6 +207,7 @@ class WebRTCSessionViewModel(application: Application) : AndroidViewModel(applic
             is SignalingMessage.RoomRejoined -> {
                 _uiState.value = _uiState.value.copy(
                     roomCode = message.room,
+                    viewerUrl = WebRTCConfig.viewerUrl(message.room),
                     connectionState = WebRTCConnectionState.WaitingForPeer,
                 )
                 savedRoomCode = message.room

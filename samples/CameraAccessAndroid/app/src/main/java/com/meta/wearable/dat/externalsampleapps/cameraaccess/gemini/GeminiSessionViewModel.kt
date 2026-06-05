@@ -87,7 +87,6 @@ class GeminiSessionViewModel : ViewModel() {
 
         geminiService.onInputTranscription = { text ->
             val transcript = _uiState.value.userTranscript + text
-            maybeSendOnDemandVisualContext(transcript)
             _uiState.value = _uiState.value.copy(
                 userTranscript = transcript,
                 aiTranscript = ""
@@ -239,31 +238,20 @@ class GeminiSessionViewModel : ViewModel() {
         }
     }
 
-    private fun captureCurrentView(call: GeminiFunctionCall): ToolResult {
-        val ageMs = VisualMemoryFrameStore.latestAgeMs()
-        if (ageMs == null) {
-            return ToolResult.Failure(
-                "No camera frame is available yet. Ask the user to start camera streaming, then retry."
-            )
-        }
-        if (!VisualMemoryFrameStore.isLatestFresh()) {
-            return ToolResult.Failure(
-                "The latest camera frame is ${ageMs}ms old, so it may not match what the user is seeing now. Ask the user to hold still for a moment and try again before saving or answering."
-            )
-        }
-        val latestFrame = VisualMemoryFrameStore.latestBase64()
+    private suspend fun captureCurrentView(call: GeminiFunctionCall): ToolResult {
+        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
             ?: return ToolResult.Failure(
-                "No camera frame is available yet. Ask the user to start camera streaming, then retry."
+                "No fresh camera image is available. Ask the user to hold still and retry."
             )
 
-        geminiService.sendVideoFrameBase64(latestFrame)
+        geminiService.sendVideoFrameBase64(visualFrame.base64)
         visualContextSentForTurn = true
         lastOnDemandVisualContextAt = System.currentTimeMillis()
 
         val reason = call.args["reason"]?.toString() ?: "current visual context"
-        Log.d(TAG, "capture_current_view sent one frame, reason=$reason")
+        Log.d(TAG, "capture_current_view sent ${visualFrame.source}, reason=$reason")
         return ToolResult.Success(
-            "Attached one fresh camera frame (${ageMs}ms old) to this conversation. Use the image to answer the user's visual question or to fill ai_interpretation before saving. reason=$reason"
+            "Attached one fresh camera image from ${visualFrame.source} (${visualFrame.ageMs}ms old) to this conversation. Use the image to answer the user's visual question or to fill ai_interpretation before saving. reason=$reason"
         )
     }
 

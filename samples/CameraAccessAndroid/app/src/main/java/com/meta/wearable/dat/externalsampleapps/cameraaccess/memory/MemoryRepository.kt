@@ -1,6 +1,12 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.memory
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -14,6 +20,8 @@ class MemoryRepository {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
     private val jsonMediaType = "application/json".toMediaType()
+    private val kstZone = ZoneId.of("Asia/Seoul")
+    private val displayFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
 
     fun recent(limit: Int = 30): List<MemoryItem> {
         val body = JSONObject()
@@ -62,14 +70,42 @@ class MemoryRepository {
 
     private fun parseMemory(json: JSONObject): MemoryItem {
         val metadata = json.optJSONObject("metadata") ?: JSONObject()
+        val capturedAt = json.optString("captured_at")
         return MemoryItem(
             id = json.optString("id"),
-            capturedAt = json.optString("captured_at"),
+            capturedAt = capturedAt,
+            capturedAtDisplay = formatKst(capturedAt, metadata.optString("captured_at_kst")),
             text = json.optString("text"),
             userNote = metadata.optString("user_note").ifBlank { null },
             aiInterpretation = metadata.optString("ai_interpretation").ifBlank { null },
             peopleText = metadata.optString("people_text").ifBlank { null },
             imageFilename = metadata.optString("image_filename").ifBlank { null },
         )
+    }
+
+    fun loadImage(filename: String): Bitmap? {
+        val request = Request.Builder()
+            .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/images/$filename")
+            .get()
+            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+            val bytes = response.body?.bytes() ?: return null
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+    }
+
+    private fun formatKst(capturedAt: String, capturedAtKst: String): String {
+        val source = capturedAtKst.ifBlank { capturedAt }
+        return try {
+            ZonedDateTime.parse(source).withZoneSameInstant(kstZone).format(displayFormatter)
+        } catch (_: Exception) {
+            try {
+                Instant.parse(capturedAt).atZone(kstZone).format(displayFormatter)
+            } catch (_: Exception) {
+                capturedAt.take(16)
+            }
+        }
     }
 }
