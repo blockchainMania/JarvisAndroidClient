@@ -14,6 +14,9 @@ object VisualMemoryFrameStore {
         val capturedAtMs: Long,
         val ageMs: Long,
         val source: String,
+        val width: Int,
+        val height: Int,
+        val jpegBytes: Int,
     )
 
     @Volatile
@@ -23,6 +26,12 @@ object VisualMemoryFrameStore {
     private var latestCapturedAtMs: Long = 0L
 
     @Volatile
+    private var latestWidth: Int = 0
+
+    @Volatile
+    private var latestHeight: Int = 0
+
+    @Volatile
     var freshStillProvider: (suspend () -> VisualFrame?)? = null
 
     fun update(bitmap: Bitmap) {
@@ -30,6 +39,8 @@ object VisualMemoryFrameStore {
         bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
         latestJpeg = output.toByteArray()
         latestCapturedAtMs = System.currentTimeMillis()
+        latestWidth = bitmap.width
+        latestHeight = bitmap.height
     }
 
     fun latestBase64(): String? {
@@ -60,18 +71,25 @@ object VisualMemoryFrameStore {
             capturedAtMs = latestCapturedAtMs,
             ageMs = ageMs,
             source = "latest_video_frame",
+            width = latestWidth,
+            height = latestHeight,
+            jpegBytes = jpeg.size,
         )
     }
 
     fun bitmapToVisualFrame(bitmap: Bitmap, source: String): VisualFrame {
         val output = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, STILL_JPEG_QUALITY, output)
+        val jpeg = output.toByteArray()
         val capturedAtMs = System.currentTimeMillis()
         return VisualFrame(
-            base64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP),
+            base64 = Base64.encodeToString(jpeg, Base64.NO_WRAP),
             capturedAtMs = capturedAtMs,
             ageMs = 0L,
             source = source,
+            width = bitmap.width,
+            height = bitmap.height,
+            jpegBytes = jpeg.size,
         )
     }
 }

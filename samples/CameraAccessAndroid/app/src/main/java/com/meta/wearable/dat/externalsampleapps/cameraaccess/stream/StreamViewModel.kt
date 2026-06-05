@@ -66,6 +66,7 @@ class StreamViewModel(
     private const val GLASSES_START_TIMEOUT_MS = 12_000L
     private const val GLASSES_FRAME_INTERVAL_MS = 100L
     private const val GLASSES_FRAME_LOG_INTERVAL_MS = 5_000L
+    private const val GLASSES_STABLE_RESET_MS = 30_000L
     private val INITIAL_STATE = StreamUiState()
   }
 
@@ -83,8 +84,9 @@ class StreamViewModel(
     private var lastGlassesFrameAt = 0L
     private var lastGlassesFrameLogAt = 0L
     private var userRequestedStop = false
-    private var autoRestartJob: Job? = null
-    private var autoRestartAttempts = 0
+  private var autoRestartJob: Job? = null
+  private var autoRestartAttempts = 0
+  private var stableStreamJob: Job? = null
 
   // VisionClaw additions
   var geminiViewModel: GeminiSessionViewModel? = null
@@ -147,9 +149,9 @@ class StreamViewModel(
 
             if (currentState == StreamSessionState.STREAMING && !isStreamingServiceRunning) {
               hasReachedGlassesStreaming = true
-              autoRestartAttempts = 0
               startTimeoutJob?.cancel()
               startTimeoutJob = null
+              scheduleStableStreamReset()
               StreamingService.start(getApplication())
               isStreamingServiceRunning = true
             }
@@ -208,6 +210,8 @@ class StreamViewModel(
     userRequestedStop = true
     autoRestartJob?.cancel()
     autoRestartJob = null
+    stableStreamJob?.cancel()
+    stableStreamJob = null
     stopActiveStream()
     _uiState.update { INITIAL_STATE }
   }
@@ -225,6 +229,8 @@ class StreamViewModel(
     videoJob = null
     stateJob?.cancel()
     stateJob = null
+    stableStreamJob?.cancel()
+    stableStreamJob = null
     streamSession?.close()
     streamSession = null
     phoneCameraManager?.stop()
@@ -252,6 +258,22 @@ class StreamViewModel(
           delay(1_500L)
           if (!userRequestedStop && _uiState.value.streamingMode == StreamingMode.GLASSES) {
             startStream()
+          }
+        }
+  }
+
+  private fun scheduleStableStreamReset() {
+    stableStreamJob?.cancel()
+    stableStreamJob =
+        viewModelScope.launch {
+          delay(GLASSES_STABLE_RESET_MS)
+          if (
+              !userRequestedStop &&
+                  _uiState.value.streamingMode == StreamingMode.GLASSES &&
+                  _uiState.value.streamSessionState == StreamSessionState.STREAMING
+          ) {
+            autoRestartAttempts = 0
+            Log.d(TAG, "Glasses stream stable for ${GLASSES_STABLE_RESET_MS}ms; restart counter reset")
           }
         }
   }

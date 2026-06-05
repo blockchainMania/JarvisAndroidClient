@@ -274,7 +274,7 @@ class GeminiSessionViewModel : ViewModel() {
         geminiService.sendVideoFrameBase64(visualFrame.base64)
         Log.d(
             TAG,
-            "Sent one on-demand visual frame (${visualFrame.source}, ${visualFrame.ageMs}ms) for transcript=${transcript.take(80)}"
+            "Sent one on-demand visual frame (${visualFrame.source}, ${visualFrame.width}x${visualFrame.height}, ${visualFrame.jpegBytes} bytes, ${visualFrame.ageMs}ms) for transcript=${transcript.take(80)}"
         )
     }
 
@@ -331,9 +331,12 @@ class GeminiSessionViewModel : ViewModel() {
         lastOnDemandVisualContextAt = System.currentTimeMillis()
 
         val reason = call.args["reason"]?.toString() ?: "current visual context"
-        Log.d(TAG, "capture_current_view sent ${visualFrame.source}, reason=$reason")
+        Log.d(
+            TAG,
+            "capture_current_view sent ${visualFrame.source}, ${visualFrame.width}x${visualFrame.height}, ${visualFrame.jpegBytes} bytes, reason=$reason"
+        )
         return ToolResult.Success(
-            "Attached one fresh camera image from ${visualFrame.source} (${visualFrame.ageMs}ms old) to this conversation. Use the image to answer the user's visual question or to fill ai_interpretation before saving. reason=$reason"
+            "Attached one fresh camera image from ${visualFrame.source} (${visualFrame.width}x${visualFrame.height}, ${visualFrame.jpegBytes} bytes, ${visualFrame.ageMs}ms old) to this conversation. Use the image to answer the user's visual question or to fill ai_interpretation before saving. If the image is unclear or too low resolution, say that you are not sure and ask the user to hold still or move closer. reason=$reason"
         )
     }
 
