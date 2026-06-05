@@ -5,9 +5,9 @@ import android.util.Base64
 import java.io.ByteArrayOutputStream
 
 object VisualMemoryFrameStore {
-    private const val JPEG_QUALITY = 70
-    private const val STILL_JPEG_QUALITY = 88
-    private const val MAX_FRESH_FRAME_AGE_MS = 2_000L
+    private const val JPEG_QUALITY = 82
+    private const val STILL_JPEG_QUALITY = 94
+    private const val MAX_FRESH_FRAME_AGE_MS = 1_200L
 
     data class VisualFrame(
         val base64: String,

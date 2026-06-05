@@ -50,11 +50,19 @@ class GeminiSessionViewModel : ViewModel() {
     private var visualContextSentForTurn: Boolean = false
     private var lastOnDemandVisualContextAt: Long = 0
     private var stateObservationJob: Job? = null
+    private var reconnectJob: Job? = null
+    private var userRequestedStop: Boolean = false
+    private var reconnectAttempts: Int = 0
+    private var isRecordingTranscript: Boolean = false
+    private var recordingStartedAtMs: Long = 0L
+    private var recordingTitle: String = ""
+    private val recordingTranscript = StringBuilder()
 
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
     fun startSession() {
         if (_uiState.value.isGeminiActive) return
+        userRequestedStop = false
 
         if (!GeminiConfig.isConfigured) {
             _uiState.value = _uiState.value.copy(
@@ -91,6 +99,12 @@ class GeminiSessionViewModel : ViewModel() {
                 userTranscript = transcript,
                 aiTranscript = ""
             )
+            if (isRecordingTranscript) {
+                recordingTranscript.append(text)
+            }
+            viewModelScope.launch {
+                maybeSendOnDemandVisualContext(transcript)
+            }
         }
 
         geminiService.onOutputTranscription = { text ->
@@ -100,11 +114,8 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onDisconnected = { reason ->
-            if (_uiState.value.isGeminiActive) {
-                stopSession()
-                _uiState.value = _uiState.value.copy(
-                    errorMessage = "Connection lost: ${reason ?: "Unknown error"}"
-                )
+            if (_uiState.value.isGeminiActive && !userRequestedStop) {
+                scheduleReconnect(reason)
             }
         }
 
@@ -165,6 +176,7 @@ class GeminiSessionViewModel : ViewModel() {
                 // Start mic capture
                 try {
                     audioManager.startCapture()
+                    reconnectAttempts = 0
                 } catch (e: Exception) {
                     _uiState.value = _uiState.value.copy(
                         errorMessage = "Mic capture failed: ${e.message}"
@@ -192,6 +204,9 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     fun stopSession() {
+        userRequestedStop = true
+        reconnectJob?.cancel()
+        reconnectJob = null
         eventClient.disconnect()
         toolCallRouter?.cancelAll()
         toolCallRouter = null
@@ -200,7 +215,37 @@ class GeminiSessionViewModel : ViewModel() {
         stateObservationJob?.cancel()
         stateObservationJob = null
         visualContextSentForTurn = false
+        isRecordingTranscript = false
+        recordingTranscript.clear()
         _uiState.value = GeminiUiState()
+    }
+
+    private fun scheduleReconnect(reason: String?) {
+        if (reconnectJob?.isActive == true) return
+        if (reconnectAttempts >= 2) {
+            stopSession()
+            _uiState.value = _uiState.value.copy(
+                errorMessage = "Gemini connection lost: ${reason ?: "Unknown error"}"
+            )
+            return
+        }
+        reconnectAttempts += 1
+        reconnectJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                errorMessage = "Gemini disconnected. Reconnecting..."
+            )
+            eventClient.disconnect()
+            toolCallRouter?.cancelAll()
+            toolCallRouter = null
+            audioManager.stopCapture()
+            geminiService.disconnect()
+            stateObservationJob?.cancel()
+            stateObservationJob = null
+            visualContextSentForTurn = false
+            _uiState.value = GeminiUiState()
+            delay(1_200L)
+            startSession()
+        }
     }
 
     fun sendVideoFrameIfThrottled(bitmap: Bitmap) {
@@ -214,7 +259,7 @@ class GeminiSessionViewModel : ViewModel() {
         geminiService.sendVideoFrame(bitmap)
     }
 
-    private fun maybeSendOnDemandVisualContext(transcript: String) {
+    private suspend fun maybeSendOnDemandVisualContext(transcript: String) {
         if (visualContextSentForTurn) return
         if (!_uiState.value.isGeminiActive) return
         if (_uiState.value.connectionState != GeminiConnectionState.Ready) return
@@ -222,20 +267,57 @@ class GeminiSessionViewModel : ViewModel() {
 
         val now = System.currentTimeMillis()
         if (now - lastOnDemandVisualContextAt < 3_000L) return
-        if (!VisualMemoryFrameStore.isLatestFresh()) return
-        val latestFrame = VisualMemoryFrameStore.latestBase64() ?: return
+        val visualFrame = VisualMemoryFrameStore.captureFreshVisual() ?: return
 
         visualContextSentForTurn = true
         lastOnDemandVisualContextAt = now
-        geminiService.sendVideoFrameBase64(latestFrame)
-        Log.d(TAG, "Sent one on-demand visual frame for transcript=${transcript.take(80)}")
+        geminiService.sendVideoFrameBase64(visualFrame.base64)
+        Log.d(
+            TAG,
+            "Sent one on-demand visual frame (${visualFrame.source}, ${visualFrame.ageMs}ms) for transcript=${transcript.take(80)}"
+        )
     }
 
     private suspend fun handleLocalToolCall(call: GeminiFunctionCall): ToolResult {
         return when (call.name) {
             "capture_current_view" -> captureCurrentView(call)
+            "start_recording" -> startRecording(call)
+            "stop_recording" -> stopRecording(call)
             else -> ToolResult.Failure("Unknown local tool: ${call.name}")
         }
+    }
+
+    private fun startRecording(call: GeminiFunctionCall): ToolResult {
+        isRecordingTranscript = true
+        recordingStartedAtMs = System.currentTimeMillis()
+        recordingTitle = call.args["title"]?.toString().orEmpty()
+        recordingTranscript.clear()
+        Log.d(TAG, "Recording transcript started: $recordingTitle")
+        return ToolResult.Success(
+            "Recording started. Keep listening until the user says to stop recording."
+        )
+    }
+
+    private fun stopRecording(call: GeminiFunctionCall): ToolResult {
+        if (!isRecordingTranscript) {
+            return ToolResult.Failure("Recording is not active.")
+        }
+        isRecordingTranscript = false
+        val endedAtMs = System.currentTimeMillis()
+        val durationSec = ((endedAtMs - recordingStartedAtMs).coerceAtLeast(0L) / 1000L)
+        val transcript = recordingTranscript.toString().trim()
+        recordingTranscript.clear()
+        Log.d(TAG, "Recording transcript stopped: ${durationSec}s, ${transcript.length} chars")
+        return ToolResult.Success(
+            """
+            Recording stopped.
+            title=${recordingTitle.ifBlank { "untitled" }}
+            duration_seconds=$durationSec
+            transcript=$transcript
+
+            Summarize this transcript in Korean. Include: 핵심 요약, 결정사항, 할일, 언급된 사람/회사. If transcript is empty, tell the user no speech was captured.
+            """.trimIndent()
+        )
     }
 
     private suspend fun captureCurrentView(call: GeminiFunctionCall): ToolResult {
@@ -275,19 +357,36 @@ class GeminiSessionViewModel : ViewModel() {
             "문서",
             "명함",
             "화이트보드",
+            "차",
+            "자동차",
+            "색",
+            "색깔",
+            "물건",
+            "제품",
+            "재료",
+            "음식",
+            "간판",
+            "텍스트",
         )
         val visualActions = listOf(
             "저장",
             "기억",
             "뭐",
             "무엇",
+            "뭔",
             "누구",
             "어디",
+            "왜",
+            "어때",
+            "맞",
+            "다시",
             "읽",
             "요약",
             "설명",
             "해석",
             "찾아",
+            "알려",
+            "보여",
         )
         return visualReferences.any { normalized.contains(it) } &&
             visualActions.any { normalized.contains(it) }

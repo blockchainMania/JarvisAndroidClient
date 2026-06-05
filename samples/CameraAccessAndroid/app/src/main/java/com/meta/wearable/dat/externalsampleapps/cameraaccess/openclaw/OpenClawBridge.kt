@@ -122,6 +122,8 @@ class OpenClawBridge {
                             "user_note",
                             "ai_interpretation",
                             "people_text",
+                            "labels",
+                            "entities",
                             "related_person_ids",
                             "source",
                         )

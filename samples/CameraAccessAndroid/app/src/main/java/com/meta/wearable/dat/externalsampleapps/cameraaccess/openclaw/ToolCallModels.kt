@@ -107,6 +107,8 @@ sealed class OpenClawConnectionState {
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray = JSONArray()
         .put(captureCurrentView())
+        .put(startRecording())
+        .put(stopRecording())
         .put(savePerson())
         .put(searchPeople())
         .put(saveMeeting())
@@ -130,6 +132,25 @@ object ToolDeclarations {
         .put("type", "array")
         .put("items", JSONObject().put("type", "string"))
         .put("description", desc)
+
+    private fun entityArrayProp(desc: String) = JSONObject()
+        .put("type", "array")
+        .put("description", desc)
+        .put("items", JSONObject().apply {
+            put("type", "object")
+            put("properties", JSONObject()
+                .put("type", enumProp(
+                    "객체 타입",
+                    listOf("person", "company", "object", "place", "document", "business_card", "vehicle", "food"),
+                ))
+                .put("label", strProp("객체 이름/표시명. 예: '김민수 팀장', 'ABC상사', '빨간 자동차'"))
+                .put("aliases", arrStrProp("별칭 목록 (선택)"))
+                .put("metadata", JSONObject()
+                    .put("type", "object")
+                    .put("description", "명함의 전화번호/email/직책 등 추가 JSON 정보"))
+            )
+            put("required", JSONArray(listOf("type", "label")))
+        })
 
     private fun enumProp(desc: String, values: List<String>) = JSONObject()
         .put("type", "string")
@@ -159,6 +180,24 @@ object ToolDeclarations {
         properties = JSONObject()
             .put("reason", strProp("현재 시야가 필요한 이유. 예: '재료 식별', '명함 읽기', '장면 저장 전 해석'")),
         required = listOf("reason"),
+    )
+
+    private fun startRecording() = decl(
+        name = "start_recording",
+        description = "사용자가 '녹음 시작해줘', '회의 기록 시작', '지금부터 받아 적어줘'라고 하면 호출. 앱은 이후 사용자 발화 transcript를 모읍니다.",
+        properties = JSONObject()
+            .put("title", strProp("녹음/회의 제목 (선택)")),
+        required = emptyList(),
+    )
+
+    private fun stopRecording() = decl(
+        name = "stop_recording",
+        description = "사용자가 '녹음 끝내줘', '회의 기록 종료', '요약해줘'라고 하면 호출. 앱은 녹음 구간 transcript를 반환하므로, 그 내용을 한국어로 요약하고 할일/결정사항을 알려주세요.",
+        properties = JSONObject()
+            .put("save", JSONObject()
+                .put("type", "boolean")
+                .put("description", "결과를 메모리/미팅으로 저장해야 하면 true")),
+        required = emptyList(),
     )
 
     private fun savePerson() = decl(
@@ -228,6 +267,8 @@ object ToolDeclarations {
             .put("user_note", strProp("사용자가 저장하고 싶다고 말한 핵심 정보"))
             .put("ai_interpretation", strProp("현재 이미지/상황을 AI가 해석한 설명. 장소, 물건, 사람, 맥락, 중요한 단서를 포함"))
             .put("people_text", strProp("사용자가 말한 관련 사람 정보. 예: '김민수 팀장, 어제 미팅에서 만남' (선택)"))
+            .put("labels", arrStrProp("장면 라벨. 예: business_card, document, vehicle, food, meeting_note"))
+            .put("entities", entityArrayProp("이미지와 사용자 메모에서 식별한 객체/사람/회사/문서 목록. 명함이면 person/company/business_card를 추출"))
             .put("related_person_ids", arrStrProp("이미 알고 있는 관련 person UUID 목록 (선택)"))
             .put("source", enumProp("출처", listOf("camera", "voice", "manual", "derived"))),
         required = listOf("captured_at", "user_note", "ai_interpretation"),

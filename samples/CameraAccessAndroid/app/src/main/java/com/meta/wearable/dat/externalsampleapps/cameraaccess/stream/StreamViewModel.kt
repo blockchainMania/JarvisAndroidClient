@@ -79,9 +79,12 @@ class StreamViewModel(
   private var stateJob: Job? = null
   private var startTimeoutJob: Job? = null
   private var isStreamingServiceRunning = false
-  private var hasReachedGlassesStreaming = false
-  private var lastGlassesFrameAt = 0L
-  private var lastGlassesFrameLogAt = 0L
+    private var hasReachedGlassesStreaming = false
+    private var lastGlassesFrameAt = 0L
+    private var lastGlassesFrameLogAt = 0L
+    private var userRequestedStop = false
+    private var autoRestartJob: Job? = null
+    private var autoRestartAttempts = 0
 
   // VisionClaw additions
   var geminiViewModel: GeminiSessionViewModel? = null
@@ -89,6 +92,7 @@ class StreamViewModel(
   private var phoneCameraManager: PhoneCameraManager? = null
 
   fun startStream() {
+    userRequestedStop = false
     stopActiveStream()
     hasReachedGlassesStreaming = false
     _uiState.update {
@@ -143,6 +147,7 @@ class StreamViewModel(
 
             if (currentState == StreamSessionState.STREAMING && !isStreamingServiceRunning) {
               hasReachedGlassesStreaming = true
+              autoRestartAttempts = 0
               startTimeoutJob?.cancel()
               startTimeoutJob = null
               StreamingService.start(getApplication())
@@ -152,7 +157,8 @@ class StreamViewModel(
             if (
                 currentState != prevState &&
                     currentState == StreamSessionState.STOPPED &&
-                    hasReachedGlassesStreaming
+                    hasReachedGlassesStreaming &&
+                    !userRequestedStop
             ) {
               _uiState.update {
                 it.copy(
@@ -162,8 +168,9 @@ class StreamViewModel(
               }
               if (isStreamingServiceRunning) {
                 StreamingService.stop(getApplication())
-                isStreamingServiceRunning = false
+                  isStreamingServiceRunning = false
               }
+              scheduleGlassesStreamRestart()
             }
           }
         }
@@ -198,6 +205,9 @@ class StreamViewModel(
   }
 
   fun stopStream() {
+    userRequestedStop = true
+    autoRestartJob?.cancel()
+    autoRestartJob = null
     stopActiveStream()
     _uiState.update { INITIAL_STATE }
   }
@@ -222,6 +232,28 @@ class StreamViewModel(
     VisualMemoryFrameStore.freshStillProvider = null
     lastGlassesFrameAt = 0L
     lastGlassesFrameLogAt = 0L
+  }
+
+  private fun scheduleGlassesStreamRestart() {
+    if (autoRestartJob?.isActive == true) return
+    if (autoRestartAttempts >= 2) {
+      _uiState.update {
+        it.copy(
+            errorMessage =
+                "Glasses video stream stopped repeatedly. Reconnect Bluetooth/Meta AI app, then start streaming again.",
+        )
+      }
+      return
+    }
+    autoRestartAttempts += 1
+    autoRestartJob =
+        viewModelScope.launch {
+          Log.w(TAG, "Auto-restarting glasses stream attempt $autoRestartAttempts")
+          delay(1_500L)
+          if (!userRequestedStop && _uiState.value.streamingMode == StreamingMode.GLASSES) {
+            startStream()
+          }
+        }
   }
 
   fun capturePhoto() {
