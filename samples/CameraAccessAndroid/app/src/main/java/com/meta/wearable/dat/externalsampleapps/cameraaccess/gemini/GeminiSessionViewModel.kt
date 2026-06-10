@@ -53,10 +53,6 @@ class GeminiSessionViewModel : ViewModel() {
     private var reconnectJob: Job? = null
     private var userRequestedStop: Boolean = false
     private var reconnectAttempts: Int = 0
-    private var isRecordingTranscript: Boolean = false
-    private var recordingStartedAtMs: Long = 0L
-    private var recordingTitle: String = ""
-    private val recordingTranscript = StringBuilder()
 
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
@@ -99,9 +95,6 @@ class GeminiSessionViewModel : ViewModel() {
                 userTranscript = transcript,
                 aiTranscript = ""
             )
-            if (isRecordingTranscript) {
-                recordingTranscript.append(text)
-            }
             viewModelScope.launch {
                 maybeSendOnDemandVisualContext(transcript)
             }
@@ -215,8 +208,6 @@ class GeminiSessionViewModel : ViewModel() {
         stateObservationJob?.cancel()
         stateObservationJob = null
         visualContextSentForTurn = false
-        isRecordingTranscript = false
-        recordingTranscript.clear()
         _uiState.value = GeminiUiState()
     }
 
@@ -281,43 +272,8 @@ class GeminiSessionViewModel : ViewModel() {
     private suspend fun handleLocalToolCall(call: GeminiFunctionCall): ToolResult {
         return when (call.name) {
             "capture_current_view" -> captureCurrentView(call)
-            "start_recording" -> startRecording(call)
-            "stop_recording" -> stopRecording(call)
             else -> ToolResult.Failure("Unknown local tool: ${call.name}")
         }
-    }
-
-    private fun startRecording(call: GeminiFunctionCall): ToolResult {
-        isRecordingTranscript = true
-        recordingStartedAtMs = System.currentTimeMillis()
-        recordingTitle = call.args["title"]?.toString().orEmpty()
-        recordingTranscript.clear()
-        Log.d(TAG, "Recording transcript started: $recordingTitle")
-        return ToolResult.Success(
-            "Recording started. Keep listening until the user says to stop recording."
-        )
-    }
-
-    private fun stopRecording(call: GeminiFunctionCall): ToolResult {
-        if (!isRecordingTranscript) {
-            return ToolResult.Failure("Recording is not active.")
-        }
-        isRecordingTranscript = false
-        val endedAtMs = System.currentTimeMillis()
-        val durationSec = ((endedAtMs - recordingStartedAtMs).coerceAtLeast(0L) / 1000L)
-        val transcript = recordingTranscript.toString().trim()
-        recordingTranscript.clear()
-        Log.d(TAG, "Recording transcript stopped: ${durationSec}s, ${transcript.length} chars")
-        return ToolResult.Success(
-            """
-            Recording stopped.
-            title=${recordingTitle.ifBlank { "untitled" }}
-            duration_seconds=$durationSec
-            transcript=$transcript
-
-            Summarize this transcript in Korean. Include: 핵심 요약, 결정사항, 할일, 언급된 사람/회사. If transcript is empty, tell the user no speech was captured.
-            """.trimIndent()
-        )
     }
 
     private suspend fun captureCurrentView(call: GeminiFunctionCall): ToolResult {

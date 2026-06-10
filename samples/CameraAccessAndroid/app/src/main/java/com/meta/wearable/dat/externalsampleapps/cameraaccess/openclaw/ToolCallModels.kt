@@ -107,8 +107,6 @@ sealed class OpenClawConnectionState {
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray = JSONArray()
         .put(captureCurrentView())
-        .put(startRecording())
-        .put(stopRecording())
         .put(savePerson())
         .put(saveMeeting())
         .put(saveMemory())

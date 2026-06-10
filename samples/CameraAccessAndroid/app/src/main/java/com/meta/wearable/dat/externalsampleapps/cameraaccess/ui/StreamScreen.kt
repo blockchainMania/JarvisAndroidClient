@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meta.wearable.dat.camera.types.StreamSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingRecordingViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
@@ -66,16 +67,19 @@ fun StreamScreen(
         ),
     geminiViewModel: GeminiSessionViewModel = viewModel(),
     webrtcViewModel: WebRTCSessionViewModel = viewModel(),
+    meetingRecordingViewModel: MeetingRecordingViewModel = viewModel(),
 ) {
     val streamUiState by streamViewModel.uiState.collectAsStateWithLifecycle()
     val geminiUiState by geminiViewModel.uiState.collectAsStateWithLifecycle()
     val webrtcUiState by webrtcViewModel.uiState.collectAsStateWithLifecycle()
+    val meetingRecordingUiState by meetingRecordingViewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
 
     fun leaveStream() {
         if (geminiUiState.isGeminiActive) geminiViewModel.stopSession()
         if (webrtcUiState.isActive) webrtcViewModel.stopSession()
+        meetingRecordingViewModel.cancelRecording()
         streamViewModel.stopStream()
         wearablesViewModel.navigateToDeviceSelection()
     }
@@ -114,6 +118,7 @@ fun StreamScreen(
             if (webrtcUiState.isActive) {
                 webrtcViewModel.stopSession()
             }
+            meetingRecordingViewModel.cancelRecording()
         }
     }
 
@@ -138,6 +143,22 @@ fun StreamScreen(
     LaunchedEffect(streamUiState.errorMessage) {
         streamUiState.errorMessage?.let { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+    LaunchedEffect(meetingRecordingUiState.errorMessage) {
+        meetingRecordingUiState.errorMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            meetingRecordingViewModel.clearMessage()
+        }
+    }
+    LaunchedEffect(meetingRecordingUiState.result) {
+        meetingRecordingUiState.result?.let { result ->
+            Toast.makeText(
+                context,
+                "회의 저장 완료: ${result.summary.take(120)}",
+                Toast.LENGTH_LONG,
+            ).show()
+            meetingRecordingViewModel.clearMessage()
         }
     }
 
@@ -192,6 +213,17 @@ fun StreamScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     WebRTCOverlay(uiState = webrtcUiState)
                 }
+                if (meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (meetingRecordingUiState.isRecording) {
+                            "Meeting recording..."
+                        } else {
+                            "Transcribing and summarizing..."
+                        },
+                        color = androidx.compose.ui.graphics.Color.White,
+                    )
+                }
             }
 
             IconButton(
@@ -219,6 +251,20 @@ fun StreamScreen(
                     }
                 },
                 isAIActive = geminiUiState.isGeminiActive,
+                aiEnabled = !meetingRecordingUiState.isRecording &&
+                    !meetingRecordingUiState.isProcessing,
+                onToggleRecording = {
+                    if (meetingRecordingUiState.isRecording) {
+                        meetingRecordingViewModel.stopAndProcess()
+                    } else {
+                        if (geminiUiState.isGeminiActive) {
+                            geminiViewModel.stopSession()
+                        }
+                        meetingRecordingViewModel.startRecording()
+                    }
+                },
+                isRecording = meetingRecordingUiState.isRecording,
+                isRecordingProcessing = meetingRecordingUiState.isProcessing,
                 onToggleLive = {
                     if (webrtcUiState.isActive) {
                         webrtcViewModel.stopSession()

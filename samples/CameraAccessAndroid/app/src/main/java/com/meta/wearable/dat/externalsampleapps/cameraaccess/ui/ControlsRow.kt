@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -28,6 +30,10 @@ fun ControlsRow(
     onCapturePhoto: () -> Unit,
     onToggleAI: () -> Unit,
     isAIActive: Boolean,
+    aiEnabled: Boolean,
+    onToggleRecording: () -> Unit,
+    isRecording: Boolean,
+    isRecordingProcessing: Boolean,
     onToggleLive: () -> Unit,
     isLiveActive: Boolean,
     onShareLive: () -> Unit,
@@ -56,6 +62,7 @@ fun ControlsRow(
         // AI toggle button
         Button(
             onClick = onToggleAI,
+            enabled = aiEnabled,
             modifier = Modifier.aspectRatio(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (isAIActive) AppColor.Green else AppColor.DeepBlue,
@@ -66,6 +73,23 @@ fun ControlsRow(
             Icon(
                 imageVector = Icons.Default.AutoAwesome,
                 contentDescription = if (isAIActive) "Stop AI" else "Start AI",
+                tint = Color.White,
+            )
+        }
+
+        Button(
+            onClick = onToggleRecording,
+            enabled = !isRecordingProcessing,
+            modifier = Modifier.aspectRatio(1f),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isRecording) AppColor.Red else AppColor.DeepBlue,
+            ),
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Icon(
+                imageVector = if (isRecording) Icons.Default.StopCircle else Icons.Default.Mic,
+                contentDescription = if (isRecording) "Stop meeting recording" else "Start meeting recording",
                 tint = Color.White,
             )
         }

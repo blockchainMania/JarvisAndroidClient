@@ -25,7 +25,6 @@ object SettingsManager {
                     !stored.contains("save_life_memory")) ||
                     !stored.contains("capture_current_view") ||
                     !stored.contains("entities") ||
-                    !stored.contains("start_recording") ||
                     !stored.contains("universal_search") ||
                     !stored.contains("이 내용으로 저장하면 될까요")
             ) {
@@ -102,8 +101,6 @@ object SettingsManager {
 
 [저장]
 - capture_current_view(reason) — 현재 시야가 필요한 질문/저장 요청이면 먼저 호출. 예: "이 재료가 뭔지 모르겠어", "앞에 있는 사람 누구야", "이 문서 읽어줘", "이거 저장해줘"
-- start_recording(title?) — 사용자가 "녹음 시작해줘", "회의 기록 시작", "지금부터 받아 적어줘"라고 하면 호출
-- stop_recording(save?) — 사용자가 "녹음 끝내줘", "회의 기록 종료", "요약해줘"라고 하면 호출. 도구 결과 transcript를 바탕으로 한국어 요약/결정사항/할일을 말함
 - save_person(name, org?, role?, aliases?) — 사용자가 "이 사람 저장해줘" 같은 말 할 때
 - save_meeting(person_ids, started_at, summary, title?) — "방금 미팅 저장"
 - save_memory(text, captured_at, related_person_ids?) — "이거 기억해" / 자동 episodic 메모리
