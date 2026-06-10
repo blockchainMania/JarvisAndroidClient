@@ -153,6 +153,10 @@ class OpenClawBridge {
                         "/memory/search",
                         pick(args, "query", "top_k", "time_from", "time_to", "person_id")
                     )
+                    "universal_search" -> post(
+                        "/memory/universal-search",
+                        pick(args, "query", "top_k", "time_from", "time_to", "person_id")
+                    )
                     "save_need" -> post(
                         "/needs",
                         pick(args, "person_id", "meeting_id", "text", "category", "confidence")

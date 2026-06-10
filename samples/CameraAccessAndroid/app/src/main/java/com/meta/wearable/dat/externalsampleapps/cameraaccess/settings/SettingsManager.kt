@@ -26,6 +26,7 @@ object SettingsManager {
                     !stored.contains("capture_current_view") ||
                     !stored.contains("entities") ||
                     !stored.contains("start_recording") ||
+                    !stored.contains("universal_search") ||
                     !stored.contains("이 내용으로 저장하면 될까요")
             ) {
                 DEFAULT_SYSTEM_PROMPT
@@ -110,9 +111,7 @@ object SettingsManager {
 - save_need(person_id, text, category?, meeting_id?) — 미팅에서 나온 사람의 니즈/관심사 기록. category는 pain, interest, constraint, budget, timeline 중 하나
 
 [검색]
-- search_people(query) — 이름·별칭·회사로 사람 검색 (예: "박부장 찾아줘")
-- search_meetings(query, time_from?, time_to?) — 미팅 의미 검색 (예: "지난번 배터리 부품사 미팅")
-- search_memory(query, time_from?, time_to?, person_id?) — episodic 메모리 검색 (예: "1시간 전 본 거", "지난주 만난 사람")
+- universal_search(query, time_from?, time_to?, person_id?) — 사람, 물건, 명함, 문서, 장소, 미팅, 니즈 등 모든 과거 정보 검색. memories에서 가장 관련 높은 기억을 찾은 뒤 연결된 people, meeting, entities, needs를 함께 반환. "박부장 찾아줘", "지난번 배터리 미팅", "1시간 전 본 명함" 등 모든 검색 질문은 이 도구 하나를 사용
 
 [제안 합성]
 - get_proposal_context(person_id) — 사용자가 "이 사람한테 어떤 제안 좋을지", "관심 있어 할 포인트" 같이 물으면 이 도구로 person + 모든 needs + 최근 미팅을 받아서 **당신이 직접 합성해** 답하세요. needs의 category(pain/interest/constraint/budget/timeline)를 우선순위로 활용.
@@ -121,7 +120,7 @@ object SettingsManager {
 1. 도구 호출 직전에 짧게 "네, 저장할게요" / "잠시만요, 찾아볼게요" 같은 음성 ack를 먼저 하세요. 절대 침묵하고 도구 부르지 마세요.
 2. 시간 표현은 한국 시간(Asia/Seoul)을 기준으로 해석하세요. 저장 시각은 앱이 한국 시간 ISO 8601(+09:00)로 보정합니다. 검색 time_from/time_to도 사용자의 한국 시간 표현("1시간 전", "지난주", "오늘")을 기준으로 계산하세요.
 3. 사람 식별이 모호하면 확인: "DH배터리 박부장님 말씀이실까요?"
-4. 도구 결과는 JSON 문자열입니다. 그 안의 필드(name, summary, text, category 등)를 자연스러운 한국어 문장으로 변환해 말하세요.
+4. universal_search 결과는 기억별 memory, score, people, meeting, entities, needs가 포함된 JSON입니다. 상위 기억과 연결 정보를 종합해서 자연스러운 한국어로 답하세요.
 5. 사용자가 일상 장면 저장을 요청하면 바로 save_life_memory를 호출하지 마세요. 먼저 capture_current_view를 호출해 현재 이미지를 확인하고, "지금 보이는 건 ...입니다. 이걸 '...'로 저장하면 될까요?"처럼 짧게 확인하세요.
 6. 사용자가 "응", "그래", "저장해"처럼 승인하면 그때 save_life_memory를 호출하세요. 사용자가 수정하면 수정된 사용자 메모를 반영하세요.
 7. save_life_memory의 ai_interpretation에는 현재 보이는 이미지에서 추론 가능한 장소/물건/문서/사람/상황 단서를 구체적으로 적고, 확실하지 않은 내용은 단정하지 마세요.

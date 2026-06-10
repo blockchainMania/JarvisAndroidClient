@@ -110,12 +110,10 @@ object ToolDeclarations {
         .put(startRecording())
         .put(stopRecording())
         .put(savePerson())
-        .put(searchPeople())
         .put(saveMeeting())
-        .put(searchMeetings())
         .put(saveMemory())
         .put(saveLifeMemory())
-        .put(searchMemory())
+        .put(universalSearch())
         .put(saveNeed())
         .put(getProposalContext())
 
@@ -283,6 +281,18 @@ object ToolDeclarations {
             .put("time_from", strProp("시작 시간 (ISO 8601 UTC, 선택)"))
             .put("time_to", strProp("끝 시간 (ISO 8601 UTC, 선택)"))
             .put("person_id", strProp("특정 person UUID로 필터 (선택)")),
+        required = listOf("query"),
+    )
+
+    private fun universalSearch() = decl(
+        name = "universal_search",
+        description = "저장된 사람, 물건, 명함, 문서, 장소, 미팅, 니즈 등 모든 과거 정보를 하나의 기억 검색으로 찾습니다. memories에서 의미/정확 검색 후 연결된 people, meeting, entities, needs를 함께 반환합니다. 모든 과거 정보 질문에는 이 도구를 우선 사용하세요.",
+        properties = JSONObject()
+            .put("query", strProp("사용자의 자연어 검색 질문 전체"))
+            .put("top_k", intProp("반환할 기억 개수. 기본 5"))
+            .put("time_from", strProp("시작 시간 ISO 8601 (선택)"))
+            .put("time_to", strProp("끝 시간 ISO 8601 (선택)"))
+            .put("person_id", strProp("이미 알고 있는 특정 person UUID 필터 (선택)")),
         required = listOf("query"),
     )
 
