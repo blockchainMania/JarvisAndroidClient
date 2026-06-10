@@ -5,7 +5,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsMa
 object GeminiConfig {
     const val WEBSOCKET_BASE_URL =
         "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-    const val MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+    const val MODEL = "models/gemini-3.1-flash-live-preview"
 
     const val INPUT_AUDIO_SAMPLE_RATE = 16000
     const val OUTPUT_AUDIO_SAMPLE_RATE = 24000

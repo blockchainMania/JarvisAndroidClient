@@ -93,7 +93,7 @@ class GeminiLiveService {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                val msg = t.message ?: "Unknown error"
+                val msg = friendlyError(t.message ?: "Unknown error")
                 Log.e(TAG, "WebSocket failure: $msg")
                 _connectionState.value = GeminiConnectionState.Error(msg)
                 _isModelSpeaking.value = false
@@ -106,7 +106,7 @@ class GeminiLiveService {
                 _connectionState.value = GeminiConnectionState.Disconnected
                 _isModelSpeaking.value = false
                 resolveConnect(false)
-                onDisconnected?.invoke("Connection closed (code $code: $reason)")
+                onDisconnected?.invoke(friendlyError("Connection closed (code $code: $reason)"))
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -218,14 +218,11 @@ class GeminiLiveService {
     }
 
     private fun sendSetupMessage() {
-        val setup = JSONObject().apply {
+        val config = JSONObject().apply {
             put("setup", JSONObject().apply {
                 put("model", GeminiConfig.MODEL)
                 put("generationConfig", JSONObject().apply {
                     put("responseModalities", JSONArray().put("AUDIO"))
-                    put("thinkingConfig", JSONObject().apply {
-                        put("thinkingBudget", 0)
-                    })
                 })
                 put("systemInstruction", JSONObject().apply {
                     put("parts", JSONArray().put(JSONObject().apply {
@@ -256,17 +253,31 @@ class GeminiLiveService {
             })
         }
         // Send directly (not via sendExecutor) to ensure it's the first message
-        webSocket?.send(setup.toString())
+        val sent = webSocket?.send(config.toString()) ?: false
+        Log.d(TAG, "Live config sent=$sent model=${GeminiConfig.MODEL}")
     }
 
     private fun handleMessage(text: String) {
         try {
             val json = JSONObject(text)
 
-            // Setup complete
-            if (json.has("setupComplete")) {
+            // The API historically returned setupComplete; newer docs use config terminology.
+            if (json.has("setupComplete") || json.has("configComplete")) {
                 _connectionState.value = GeminiConnectionState.Ready
                 resolveConnect(true)
+                return
+            }
+
+            if (json.has("error")) {
+                val error = json.optJSONObject("error")
+                val message = friendlyError(error?.optString("message")
+                    ?.ifBlank { null }
+                    ?: json.optString("error", "Gemini Live configuration failed")
+                )
+                Log.e(TAG, "Gemini Live error: $message")
+                _connectionState.value = GeminiConnectionState.Error(message)
+                resolveConnect(false)
+                onDisconnected?.invoke(message)
                 return
             }
 
@@ -362,9 +373,25 @@ class GeminiLiveService {
                         onOutputTranscription?.invoke(transcriptText)
                     }
                 }
+                return
             }
+
+            Log.d(TAG, "Unhandled Gemini Live message: ${text.take(500)}")
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing message: ${e.message}")
+        }
+    }
+
+    private fun friendlyError(raw: String): String {
+        val normalized = raw.lowercase()
+        return when {
+            "prepayment credits are depleted" in normalized ->
+                "Gemini API 크레딧이 소진되었습니다. Google AI Studio 프로젝트의 Billing/Credits를 충전해주세요."
+            "api key not valid" in normalized || "invalid api key" in normalized ->
+                "Gemini API 키가 유효하지 않습니다. Settings 또는 Secrets.kt의 키를 확인해주세요."
+            "quota" in normalized || "resource exhausted" in normalized ->
+                "Gemini API 사용 한도를 초과했습니다. 잠시 후 다시 시도하거나 프로젝트 할당량을 확인해주세요."
+            else -> raw
         }
     }
 }
