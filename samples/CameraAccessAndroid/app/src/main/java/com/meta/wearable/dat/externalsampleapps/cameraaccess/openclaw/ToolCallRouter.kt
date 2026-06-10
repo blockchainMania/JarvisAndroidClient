@@ -19,6 +19,24 @@ class ToolCallRouter(
     companion object {
         private const val TAG = "ToolCallRouter"
         private const val MAX_CONSECUTIVE_FAILURES = 3
+
+        fun buildImmediateResponse(call: GeminiFunctionCall, result: ToolResult): JSONObject =
+            buildToolResponse(call.id, call.name, result)
+
+        private fun buildToolResponse(
+            callId: String,
+            name: String,
+            result: ToolResult
+        ): JSONObject =
+            JSONObject().apply {
+                put("toolResponse", JSONObject().apply {
+                    put("functionResponses", JSONArray().put(JSONObject().apply {
+                        put("id", callId)
+                        put("name", name)
+                        put("response", result.toJSON())
+                    }))
+                })
+            }
     }
 
     private val inFlightJobs = mutableMapOf<String, Job>()
@@ -70,15 +88,20 @@ class ToolCallRouter(
 
     private val LOCAL_TOOL_NAMES = setOf("capture_current_view")
 
-    fun cancelToolCalls(ids: List<String>) {
+    fun cancelToolCalls(ids: List<String>): Int {
+        var cancelledCount = 0
         for (id in ids) {
             inFlightJobs[id]?.let { job ->
                 Log.d(TAG, "Cancelling in-flight call: $id")
                 job.cancel()
                 inFlightJobs.remove(id)
+                cancelledCount++
             }
         }
-        bridge.setToolCallStatus(ToolCallStatus.Cancelled(ids.firstOrNull() ?: "unknown"))
+        if (cancelledCount > 0) {
+            bridge.setToolCallStatus(ToolCallStatus.Cancelled(ids.firstOrNull() ?: "unknown"))
+        }
+        return cancelledCount
     }
 
     fun cancelAll() {
@@ -90,19 +113,4 @@ class ToolCallRouter(
         consecutiveFailures = 0
     }
 
-    private fun buildToolResponse(
-        callId: String,
-        name: String,
-        result: ToolResult
-    ): JSONObject {
-        return JSONObject().apply {
-            put("toolResponse", JSONObject().apply {
-                put("functionResponses", JSONArray().put(JSONObject().apply {
-                    put("id", callId)
-                    put("name", name)
-                    put("response", result.toJSON())
-                }))
-            })
-        }
-    }
 }

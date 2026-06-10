@@ -393,6 +393,9 @@ class StreamViewModel(
       }
       StreamingMode.GLASSES -> {
         try {
+          // DAT video delivery trails the real scene. Capture only after the spoken request has
+          // completed and allow the glasses camera pipeline to catch up before taking the still.
+          delay(900L)
           val photoData = streamSession?.capturePhoto()?.getOrNull() ?: return null
           val bitmap = withContext(Dispatchers.Default) { photoDataToBitmap(photoData) }
           VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "glasses_capture_photo")

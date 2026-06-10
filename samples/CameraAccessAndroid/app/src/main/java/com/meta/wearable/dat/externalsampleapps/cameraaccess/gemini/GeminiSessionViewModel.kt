@@ -46,13 +46,15 @@ class GeminiSessionViewModel : ViewModel() {
     private var toolCallRouter: ToolCallRouter? = null
     private val audioManager = AudioManager()
     private val eventClient = OpenClawEventClient()
-    private var lastVideoFrameTime: Long = 0
     private var visualContextSentForTurn: Boolean = false
-    private var lastOnDemandVisualContextAt: Long = 0
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
     private var userRequestedStop: Boolean = false
     private var reconnectAttempts: Int = 0
+    @Volatile
+    private var inputAudioSuspended: Boolean = false
+    private var inFlightToolCalls: Int = 0
+    private var wakeWordDetectedForTurn: Boolean = false
 
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
@@ -71,13 +73,16 @@ class GeminiSessionViewModel : ViewModel() {
 
         // Wire audio callbacks
         audioManager.onAudioCaptured = lambda@{ data ->
-            // Phone mode: mute mic while model speaks to prevent echo
-            if (streamingMode == StreamingMode.PHONE && geminiService.isModelSpeaking.value) return@lambda
+            if (inputAudioSuspended) return@lambda
+            // Do not feed speaker output or room speech back into a response in progress.
+            if (geminiService.isModelSpeaking.value) return@lambda
             geminiService.sendAudio(data)
         }
 
         geminiService.onAudioReceived = { data ->
-            audioManager.playAudio(data)
+            if (wakeWordDetectedForTurn) {
+                audioManager.playAudio(data)
+            }
         }
 
         geminiService.onInterrupted = {
@@ -86,18 +91,19 @@ class GeminiSessionViewModel : ViewModel() {
 
         geminiService.onTurnComplete = {
             visualContextSentForTurn = false
+            wakeWordDetectedForTurn = false
             _uiState.value = _uiState.value.copy(userTranscript = "")
         }
 
         geminiService.onInputTranscription = { text ->
             val transcript = _uiState.value.userTranscript + text
+            if (transcript.trimStart().startsWith("자비스")) {
+                wakeWordDetectedForTurn = true
+            }
             _uiState.value = _uiState.value.copy(
                 userTranscript = transcript,
                 aiTranscript = ""
             )
-            viewModelScope.launch {
-                maybeSendOnDemandVisualContext(transcript)
-            }
         }
 
         geminiService.onOutputTranscription = { text ->
@@ -124,16 +130,38 @@ class GeminiSessionViewModel : ViewModel() {
                 localToolHandler = ::handleLocalToolCall,
             )
 
-            geminiService.onToolCall = { toolCall ->
+            geminiService.onToolCall = toolCallHandler@{ toolCall ->
+                if (!wakeWordDetectedForTurn) {
+                    Log.d(TAG, "Ignoring tool call because the current turn has no wake word")
+                    for (call in toolCall.functionCalls) {
+                        geminiService.sendToolResponse(
+                            ToolCallRouter.buildImmediateResponse(
+                                call,
+                                ToolResult.Failure(
+                                    "Ignored because the user did not start this turn with the wake word 자비스."
+                                ),
+                            )
+                        )
+                    }
+                    return@toolCallHandler
+                }
+
+                inFlightToolCalls += toolCall.functionCalls.size
+                inputAudioSuspended = true
+                Log.d(TAG, "Suspending Gemini input for ${toolCall.functionCalls.size} tool call(s)")
                 for (call in toolCall.functionCalls) {
                     toolCallRouter?.handleToolCall(call) { response ->
                         geminiService.sendToolResponse(response)
+                        onToolCallFinished()
                     }
                 }
             }
 
             geminiService.onToolCallCancellation = { cancellation ->
-                toolCallRouter?.cancelToolCalls(cancellation.ids)
+                val cancelledCount = toolCallRouter?.cancelToolCalls(cancellation.ids) ?: 0
+                repeat(cancelledCount) {
+                    onToolCallFinished()
+                }
             }
 
             // Observe service state
@@ -208,6 +236,9 @@ class GeminiSessionViewModel : ViewModel() {
         stateObservationJob?.cancel()
         stateObservationJob = null
         visualContextSentForTurn = false
+        inputAudioSuspended = false
+        inFlightToolCalls = 0
+        wakeWordDetectedForTurn = false
         _uiState.value = GeminiUiState()
     }
 
@@ -233,6 +264,9 @@ class GeminiSessionViewModel : ViewModel() {
             stateObservationJob?.cancel()
             stateObservationJob = null
             visualContextSentForTurn = false
+            inputAudioSuspended = false
+            inFlightToolCalls = 0
+            wakeWordDetectedForTurn = false
             _uiState.value = GeminiUiState()
             delay(1_200L)
             startSession()
@@ -241,32 +275,8 @@ class GeminiSessionViewModel : ViewModel() {
 
     fun sendVideoFrameIfThrottled(bitmap: Bitmap) {
         VisualMemoryFrameStore.update(bitmap)
-        if (!SettingsManager.videoStreamingEnabled) return
-        if (!_uiState.value.isGeminiActive) return
-        if (_uiState.value.connectionState != GeminiConnectionState.Ready) return
-        val now = System.currentTimeMillis()
-        if (now - lastVideoFrameTime < GeminiConfig.VIDEO_FRAME_INTERVAL_MS) return
-        lastVideoFrameTime = now
-        geminiService.sendVideoFrame(bitmap)
-    }
-
-    private suspend fun maybeSendOnDemandVisualContext(transcript: String) {
-        if (visualContextSentForTurn) return
-        if (!_uiState.value.isGeminiActive) return
-        if (_uiState.value.connectionState != GeminiConnectionState.Ready) return
-        if (!looksLikeVisualRequest(transcript)) return
-
-        val now = System.currentTimeMillis()
-        if (now - lastOnDemandVisualContextAt < 3_000L) return
-        val visualFrame = VisualMemoryFrameStore.captureFreshVisual() ?: return
-
-        visualContextSentForTurn = true
-        lastOnDemandVisualContextAt = now
-        geminiService.sendVideoFrameBase64(visualFrame.base64)
-        Log.d(
-            TAG,
-            "Sent one on-demand visual frame (${visualFrame.source}, ${visualFrame.width}x${visualFrame.height}, ${visualFrame.jpegBytes} bytes, ${visualFrame.ageMs}ms) for transcript=${transcript.take(80)}"
-        )
+        // Keep the latest frame locally. Visual data is sent to Gemini only after an explicit
+        // capture_current_view tool call so an older stream frame cannot answer a new question.
     }
 
     private suspend fun handleLocalToolCall(call: GeminiFunctionCall): ToolResult {
@@ -284,7 +294,9 @@ class GeminiSessionViewModel : ViewModel() {
 
         geminiService.sendVideoFrameBase64(visualFrame.base64)
         visualContextSentForTurn = true
-        lastOnDemandVisualContextAt = System.currentTimeMillis()
+        // Let the ordered Live API image message arrive before the tool response tells the model
+        // to answer. Without this, the model can answer from older conversation imagery.
+        delay(350L)
 
         val reason = call.args["reason"]?.toString() ?: "current visual context"
         Log.d(
@@ -296,63 +308,22 @@ class GeminiSessionViewModel : ViewModel() {
         )
     }
 
-    private fun looksLikeVisualRequest(transcript: String): Boolean {
-        val normalized = transcript.lowercase()
-        val visualReferences = listOf(
-            "이거",
-            "이것",
-            "저거",
-            "저것",
-            "앞에",
-            "눈앞",
-            "보고 있는",
-            "지금 보는",
-            "현재 보는",
-            "보이는",
-            "화면",
-            "장면",
-            "이미지",
-            "사진",
-            "문서",
-            "명함",
-            "화이트보드",
-            "차",
-            "자동차",
-            "색",
-            "색깔",
-            "물건",
-            "제품",
-            "재료",
-            "음식",
-            "간판",
-            "텍스트",
-        )
-        val visualActions = listOf(
-            "저장",
-            "기억",
-            "뭐",
-            "무엇",
-            "뭔",
-            "누구",
-            "어디",
-            "왜",
-            "어때",
-            "맞",
-            "다시",
-            "읽",
-            "요약",
-            "설명",
-            "해석",
-            "찾아",
-            "알려",
-            "보여",
-        )
-        return visualReferences.any { normalized.contains(it) } &&
-            visualActions.any { normalized.contains(it) }
-    }
-
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
+    }
+
+    private fun onToolCallFinished() {
+        inFlightToolCalls = (inFlightToolCalls - 1).coerceAtLeast(0)
+        if (inFlightToolCalls > 0) return
+
+        viewModelScope.launch {
+            // Avoid feeding room audio into Gemini while it starts speaking after a tool response.
+            delay(800L)
+            if (_uiState.value.isGeminiActive) {
+                inputAudioSuspended = false
+                Log.d(TAG, "Resumed Gemini input after tool response")
+            }
+        }
     }
 
     override fun onCleared() {

@@ -83,7 +83,7 @@ sealed class ToolCallStatus {
             is Executing -> "Running: $name..."
             is Completed -> "Done: $name"
             is Failed -> "Failed: $name - $error"
-            is Cancelled -> "Cancelled: $name"
+            is Cancelled -> "요청이 중단됐어요. 다시 말씀해주세요."
         }
 
     val isActive: Boolean
