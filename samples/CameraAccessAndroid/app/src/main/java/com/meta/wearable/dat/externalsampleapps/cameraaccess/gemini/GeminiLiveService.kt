@@ -237,7 +237,7 @@ class GeminiLiveService {
                         put("disabled", false)
                         put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
                         put("endOfSpeechSensitivity", "END_SENSITIVITY_LOW")
-                        put("silenceDurationMs", 1500)
+                        put("silenceDurationMs", 2500)
                         put("prefixPaddingMs", 40)
                     })
                     put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS")

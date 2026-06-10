@@ -97,7 +97,7 @@ class GeminiSessionViewModel : ViewModel() {
 
         geminiService.onInputTranscription = { text ->
             val transcript = _uiState.value.userTranscript + text
-            if (transcript.trimStart().startsWith("자비스")) {
+            if (hasWakeWord(transcript)) {
                 wakeWordDetectedForTurn = true
             }
             _uiState.value = _uiState.value.copy(
@@ -324,6 +324,13 @@ class GeminiSessionViewModel : ViewModel() {
                 Log.d(TAG, "Resumed Gemini input after tool response")
             }
         }
+    }
+
+    private fun hasWakeWord(transcript: String): Boolean {
+        val normalized = transcript
+            .lowercase()
+            .replace(Regex("[^가-힣a-z0-9]"), "")
+        return normalized.startsWith("자비스") || normalized.startsWith("jarvis")
     }
 
     override fun onCleared() {
