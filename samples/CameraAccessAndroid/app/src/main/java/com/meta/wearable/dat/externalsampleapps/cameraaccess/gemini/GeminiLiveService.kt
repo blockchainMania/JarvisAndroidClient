@@ -59,13 +59,18 @@ class GeminiLiveService {
     private val sendExecutor = Executors.newSingleThreadExecutor()
     private var connectCallback: ((Boolean) -> Unit)? = null
     private var timeoutTimer: Timer? = null
+    private var requireWakeWordForSession: Boolean = false
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
         .build()
 
-    fun connect(callback: (Boolean) -> Unit) {
+    fun connect(
+        requireWakeWord: Boolean,
+        speechContextHint: String? = null,
+        callback: (Boolean) -> Unit,
+    ) {
         val url = GeminiConfig.websocketURL()
         if (url == null) {
             _connectionState.value = GeminiConnectionState.Error("No API key configured")
@@ -73,6 +78,7 @@ class GeminiLiveService {
             return
         }
 
+        requireWakeWordForSession = requireWakeWord
         _connectionState.value = GeminiConnectionState.Connecting
         connectCallback = callback
 
@@ -81,7 +87,7 @@ class GeminiLiveService {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket opened")
                 _connectionState.value = GeminiConnectionState.SettingUp
-                sendSetupMessage()
+                sendSetupMessage(speechContextHint)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -201,6 +207,7 @@ class GeminiLiveService {
                             put("text", text)
                         }))
                     }))
+                    put("turnComplete", true)
                 })
             }
             webSocket?.send(json.toString())
@@ -217,7 +224,18 @@ class GeminiLiveService {
         cb?.invoke(success)
     }
 
-    private fun sendSetupMessage() {
+    private fun sendSetupMessage(speechContextHint: String?) {
+        val systemInstruction = buildString {
+            append(GeminiConfig.systemInstruction(requireWakeWordForSession))
+            append("\n\n[음성 인식 보정]\n")
+            append("- 사용자는 기본적으로 한국어로 말합니다. 영어/아랍어/일본어처럼 들려도 한국어 발화로 우선 해석하세요.\n")
+            append("- 한국 사람 이름, 회사명, 직급은 한국어 고유명사로 복원하세요. 예: 'kim yoon seop'처럼 들리면 '김윤섭'으로 해석하세요.\n")
+            append("- 연락처 검색, 전화, 문자 요청에서는 아래 연락처 이름 후보를 우선 고려하세요.\n")
+            speechContextHint?.takeIf { it.isNotBlank() }?.let {
+                append("\n")
+                append(it)
+            }
+        }
         val config = JSONObject().apply {
             put("setup", JSONObject().apply {
                 put("model", GeminiConfig.MODEL)
@@ -226,7 +244,7 @@ class GeminiLiveService {
                 })
                 put("systemInstruction", JSONObject().apply {
                     put("parts", JSONArray().put(JSONObject().apply {
-                        put("text", GeminiConfig.systemInstruction)
+                        put("text", systemInstruction)
                     }))
                 })
                 put("tools", JSONArray().put(JSONObject().apply {
@@ -238,7 +256,7 @@ class GeminiLiveService {
                         put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
                         put("endOfSpeechSensitivity", "END_SENSITIVITY_LOW")
                         put("silenceDurationMs", 2500)
-                        put("prefixPaddingMs", 40)
+                        put("prefixPaddingMs", 80)
                     })
                     put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS")
                     put("turnCoverage", "TURN_INCLUDES_ALL_INPUT")

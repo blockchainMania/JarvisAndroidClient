@@ -11,10 +11,14 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess
 import android.Manifest.permission.BLUETOOTH
 import android.Manifest.permission.BLUETOOTH_CONNECT
 import android.Manifest.permission.BLUETOOTH_SCAN
+import android.Manifest.permission.CALL_PHONE
 import android.Manifest.permission.CAMERA
 import android.Manifest.permission.INTERNET
 import android.Manifest.permission.POST_NOTIFICATIONS
+import android.Manifest.permission.READ_CONTACTS
 import android.Manifest.permission.RECORD_AUDIO
+import android.Manifest.permission.SEND_SMS
+import android.Manifest.permission.WRITE_CONTACTS
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -47,6 +51,10 @@ class MainActivity : ComponentActivity() {
                 }
                 add(INTERNET)
                 add(RECORD_AUDIO)
+                add(READ_CONTACTS)
+                add(WRITE_CONTACTS)
+                add(CALL_PHONE)
+                add(SEND_SMS)
                 add(CAMERA)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                   add(POST_NOTIFICATIONS)
@@ -79,6 +87,7 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
+    AppContextProvider.init(this)
 
     // Initialize settings with app context
     SettingsManager.init(this)

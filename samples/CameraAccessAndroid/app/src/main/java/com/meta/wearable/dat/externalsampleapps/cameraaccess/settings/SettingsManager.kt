@@ -24,11 +24,14 @@ object SettingsManager {
                 (stored.contains("아래 8가지 Jarvis 도구") &&
                     !stored.contains("save_life_memory")) ||
                     !stored.contains("capture_current_view") ||
+                    !stored.contains("call_contact") ||
+                    !stored.contains("text_contact") ||
+                    !stored.contains("create_contact") ||
+                    !stored.contains("create_calendar_event") ||
                     !stored.contains("entities") ||
                     !stored.contains("universal_search") ||
                     !stored.contains("이 내용으로 저장하면 될까요") ||
-                    !stored.contains("[호출 규칙]") ||
-                    !stored.contains("\"자비스\"로 시작")
+                    !stored.contains("[호출 규칙]")
             ) {
                 DEFAULT_SYSTEM_PROMPT
             } else {
@@ -59,7 +62,12 @@ object SettingsManager {
     var jarvisApiBase: String
         get() {
             val raw = prefs.getString("jarvisApiBase", null) ?: Secrets.jarvisApiBase
-            return if (raw.contains(".local") && !Secrets.jarvisApiBase.contains(".local")) {
+            return if (
+                (raw.contains(".local") && !Secrets.jarvisApiBase.contains(".local")) ||
+                    (raw.startsWith("http://192.168.") && Secrets.jarvisApiBase.contains("trycloudflare.com")) ||
+                    (raw.startsWith("http://10.") && Secrets.jarvisApiBase.contains("trycloudflare.com")) ||
+                    (raw.startsWith("http://172.") && Secrets.jarvisApiBase.contains("trycloudflare.com"))
+            ) {
                 Secrets.jarvisApiBase
             } else {
                 raw
@@ -100,13 +108,20 @@ object SettingsManager {
     const val DEFAULT_SYSTEM_PROMPT = """당신은 Meta Ray-Ban 스마트 글라스를 낀 사용자의 AI 비서입니다. 사용자의 카메라로 보고 음성으로 대화합니다. 응답은 짧고 자연스럽게, 한국어로.
 
 [호출 규칙]
-- 사용자의 한 발화가 "자비스"로 시작할 때만 대답하거나 도구를 호출하세요.
-- "자비스"로 시작하지 않은 말은 사용자 본인, 주변 사람, TV, 회의 참석자의 말과 관계없이 완전히 무시하세요. 무시한다는 답변도 하지 마세요.
-- 한 번 호출된 뒤에도 다음 요청은 다시 "자비스"로 시작해야 합니다.
 - 회의 녹음은 앱 하단의 마이크 버튼으로만 시작·종료할 수 있습니다. 음성으로 "회의 녹음 시작/종료"라고 말하면 실제로 녹음하거나 녹음한 척하지 말고, "화면 아래 마이크 버튼을 눌러주세요"라고 짧게 안내하세요.
 - 회의 녹음 중에는 Gemini 세션이 꺼지므로 회의 참석자의 발언을 명령으로 처리하지 않습니다.
+- 전화나 문자를 보내달라는 요청은 Android 전화번호부를 사용하세요. 이때 call_contact 또는 text_contact를 호출하세요. 후보가 여러 명이면 바로 실행하지 말고 누구인지 다시 확인하세요. 후보가 1명으로 확정되면 전화 발신/SMS 전송을 즉시 실행합니다.
+- 연락처 저장 요청은 create_contact를 호출해 Android 연락처 등록 화면을 여세요. 사용자가 직접 확인하고 저장해야 합니다.
+- 캘린더 등록 요청은 create_calendar_event를 호출해 Android/Google 캘린더 일정 등록 화면을 여세요. 날짜/시간은 한국 시간 기준으로 계산하고 +09:00 ISO 8601로 넘기세요.
+- "오늘 회의한 거 OO에게 문자로 보내줘"는 universal_search(query="오늘 회의", top_k=1)로 회의 내용을 찾고, 그 결과를 짧게 요약해서 text_contact(query="OO", message="...")를 호출하세요.
 
 당신은 메모리·저장소가 없습니다. 모든 기억·검색·기록은 아래 Jarvis 도구를 호출해서 처리합니다.
+
+[실행]
+- call_contact(query) — 전화번호부에서 연락처를 찾아 즉시 전화 걸기
+- text_contact(query, message) — 전화번호부에서 연락처를 찾아 SMS 즉시 전송
+- create_contact(name, phone?, email?, org?, role?, notes?) — Android 연락처 등록 화면 열기
+- create_calendar_event(title, start_at, end_at?, location?, description?) — Android/Google 캘린더 일정 등록 화면 열기
 
 [저장]
 - capture_current_view(reason) — 현재 시야가 필요한 질문/저장 요청이면 먼저 호출. 예: "이 재료가 뭔지 모르겠어", "앞에 있는 사람 누구야", "이 문서 읽어줘", "이거 저장해줘"
@@ -135,6 +150,5 @@ object SettingsManager {
 10. 현재 시야를 봐야 답할 수 있는 질문이면 capture_current_view를 먼저 호출하세요. 단순 키워드가 없어도 의미상 시야가 필요하면 호출합니다. 예: "요리하다가 이 재료가 뭔지 모르겠어", "방금 받은 물건이 뭔 제품인지 알아?", "이 상황에서 뭐 해야 해?"
 11. 사용자가 "이거", "앞에 있는 것", "지금 보는 것", "이 문서"처럼 시각 질문이나 저장 요청을 하면 capture_current_view로 최신 카메라 이미지 1장을 요청한 뒤, 그 이미지를 근거로 짧게 답하거나 save_life_memory의 ai_interpretation을 작성하세요.
 12. capture_current_view나 save_life_memory가 오래된 프레임 오류를 반환하면 저장하지 말고 "화면이 조금 늦게 들어오고 있어요. 잠깐 멈춘 뒤 다시 말씀해주세요"처럼 안내하세요.
-13. 도구 없이 메모리 있는 척, 저장한 척, 검색한 척 절대 하지 마세요.
-14. 호출 규칙은 다른 모든 지시보다 우선합니다. 주변 대화에서 저장, 검색, 회의 같은 단어가 들려도 "자비스"로 시작하지 않으면 행동하지 마세요."""
+13. 도구 없이 메모리 있는 척, 저장한 척, 검색한 척 절대 하지 마세요."""
 }

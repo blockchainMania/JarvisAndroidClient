@@ -37,6 +37,47 @@ class MemoryViewModel : ViewModel() {
         _uiState.update { it.copy(errorMessage = null) }
     }
 
+    fun refreshCurrent() {
+        val query = _uiState.value.query.trim()
+        if (query.isEmpty()) loadRecent() else search()
+    }
+
+    fun updateMemory(
+        memory: MemoryItem,
+        onSuccess: (MemoryItem) -> Unit,
+    ) {
+        _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+        viewModelScope.launch {
+            try {
+                val updated = withContext(Dispatchers.IO) { repository.update(memory) }
+                onSuccess(updated)
+                refreshCurrent()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update memory") }
+            } finally {
+                _uiState.update { it.copy(isSaving = false) }
+            }
+        }
+    }
+
+    fun deleteMemory(
+        memoryId: String,
+        onSuccess: () -> Unit,
+    ) {
+        _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { repository.delete(memoryId) }
+                onSuccess()
+                refreshCurrent()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to delete memory") }
+            } finally {
+                _uiState.update { it.copy(isSaving = false) }
+            }
+        }
+    }
+
     private fun runLoad(block: () -> List<MemoryItem>) {
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {

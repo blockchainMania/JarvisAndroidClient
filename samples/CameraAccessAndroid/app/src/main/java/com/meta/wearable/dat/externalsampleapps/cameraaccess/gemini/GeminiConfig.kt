@@ -15,8 +15,17 @@ object GeminiConfig {
     const val VIDEO_FRAME_INTERVAL_MS = 1000L
     const val VIDEO_JPEG_QUALITY = 50
 
-    val systemInstruction: String
-        get() = SettingsManager.geminiSystemPrompt
+    fun systemInstruction(requireWakeWord: Boolean): String {
+        val base = SettingsManager.geminiSystemPrompt
+        if (requireWakeWord) return base
+        return buildString {
+            append(base)
+            append("\n\n[현재 세션 규칙]\n")
+            append("- 이 세션은 앱의 AI 버튼으로 수동 시작되었습니다.\n")
+            append("- 이 세션에서는 사용자가 '자비스'를 말하지 않아도 바로 대답하고 도구를 호출하세요.\n")
+            append("- 이 세션에서는 웨이크워드 요구 규칙을 적용하지 마세요.\n")
+        }
+    }
 
     val apiKey: String
         get() = SettingsManager.geminiAPIKey

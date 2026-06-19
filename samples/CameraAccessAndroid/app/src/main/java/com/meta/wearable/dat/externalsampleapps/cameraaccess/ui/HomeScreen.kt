@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,8 +62,8 @@ fun HomeScreen(
       Row {
         IconButton(onClick = { viewModel.showMemory() }) {
           Icon(
-              imageVector = Icons.Default.History,
-              contentDescription = "Memory",
+              imageVector = Icons.Default.CollectionsBookmark,
+              contentDescription = "Records",
               tint = Color.Gray,
               modifier = Modifier.size(28.dp),
           )

@@ -86,7 +86,13 @@ class ToolCallRouter(
         inFlightJobs[callId] = job
     }
 
-    private val LOCAL_TOOL_NAMES = setOf("capture_current_view")
+    private val LOCAL_TOOL_NAMES = setOf(
+        "capture_current_view",
+        "call_contact",
+        "text_contact",
+        "create_contact",
+        "create_calendar_event",
+    )
 
     fun cancelToolCalls(ids: List<String>): Int {
         var cancelledCount = 0

@@ -388,6 +388,7 @@ class StreamViewModel(
     return when (_uiState.value.streamingMode) {
       StreamingMode.PHONE -> {
         _uiState.value.videoFrame?.let {
+          _uiState.update { state -> state.copy(capturedPhoto = it) }
           VisualMemoryFrameStore.bitmapToVisualFrame(it, "phone_camera_still")
         }
       }
@@ -398,6 +399,7 @@ class StreamViewModel(
           delay(2000L)
           val photoData = streamSession?.capturePhoto()?.getOrNull() ?: return null
           val bitmap = withContext(Dispatchers.Default) { photoDataToBitmap(photoData) }
+          _uiState.update { state -> state.copy(capturedPhoto = bitmap) }
           VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "glasses_capture_photo")
         } catch (e: Exception) {
           Log.w(TAG, "Fresh glasses photo capture failed, falling back to latest frame: ${e.message}")

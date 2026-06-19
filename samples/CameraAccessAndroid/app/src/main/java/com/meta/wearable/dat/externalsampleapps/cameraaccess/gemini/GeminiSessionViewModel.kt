@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.AppContextProvider
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawBridge
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawEventClient
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
@@ -13,12 +14,19 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallRo
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.VisualMemoryFrameStore
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingVoiceCommand
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingVoiceCommandParser
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.CalendarActionManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactActionManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -44,8 +52,11 @@ class GeminiSessionViewModel : ViewModel() {
     private val geminiService = GeminiLiveService()
     private val openClawBridge = OpenClawBridge()
     private var toolCallRouter: ToolCallRouter? = null
+    private val contactActionManager = ContactActionManager()
+    private val calendarActionManager = CalendarActionManager()
     private val audioManager = AudioManager()
     private val eventClient = OpenClawEventClient()
+    private var commandSpeechRecognizer: KoreanSpeechRecognizer? = null
     private var visualContextSentForTurn: Boolean = false
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
@@ -54,13 +65,22 @@ class GeminiSessionViewModel : ViewModel() {
     @Volatile
     private var inputAudioSuspended: Boolean = false
     private var inFlightToolCalls: Int = 0
-    private var wakeWordDetectedForTurn: Boolean = false
+    private var wakeWordSessionActive: Boolean = false
+    private var pendingInitialText: String? = null
+    private var lastHandledVoiceCommand: MeetingVoiceCommand? = null
+    private var lastSentSpeechText: String? = null
+    private var lastSentSpeechAt: Long = 0L
+
+    private val _voiceCommands = MutableSharedFlow<MeetingVoiceCommand>(extraBufferCapacity = 4)
+    val voiceCommands: SharedFlow<MeetingVoiceCommand> = _voiceCommands.asSharedFlow()
 
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
-    fun startSession() {
+    fun startSession(wakeWordInitiated: Boolean = false, initialText: String? = null) {
         if (_uiState.value.isGeminiActive) return
         userRequestedStop = false
+        wakeWordSessionActive = wakeWordInitiated
+        pendingInitialText = initialText?.trim().orEmpty().ifBlank { null }
 
         if (!GeminiConfig.isConfigured) {
             _uiState.value = _uiState.value.copy(
@@ -71,39 +91,58 @@ class GeminiSessionViewModel : ViewModel() {
 
         _uiState.value = _uiState.value.copy(isGeminiActive = true)
 
-        // Wire audio callbacks
-        audioManager.onAudioCaptured = lambda@{ data ->
-            if (inputAudioSuspended) return@lambda
-            // Do not feed speaker output or room speech back into a response in progress.
-            if (geminiService.isModelSpeaking.value) return@lambda
-            geminiService.sendAudio(data)
-        }
+        commandSpeechRecognizer?.stop()
+        commandSpeechRecognizer = KoreanSpeechRecognizer(
+            context = AppContextProvider.require(),
+            onPartialText = { text ->
+                _uiState.value = _uiState.value.copy(
+                    userTranscript = text,
+                    aiTranscript = "",
+                )
+            },
+            onFinalText = { text ->
+                handleRecognizedSpeech(text)
+            },
+            onErrorText = { message ->
+                _uiState.value = _uiState.value.copy(errorMessage = message)
+            },
+        )
 
         geminiService.onAudioReceived = { data ->
-            if (wakeWordDetectedForTurn) {
-                audioManager.playAudio(data)
-            }
+            commandSpeechRecognizer?.setSuspended(true)
+            audioManager.playAudio(data)
         }
 
         geminiService.onInterrupted = {
             audioManager.stopPlayback()
+            commandSpeechRecognizer?.setSuspended(false)
         }
 
         geminiService.onTurnComplete = {
             visualContextSentForTurn = false
-            wakeWordDetectedForTurn = false
             _uiState.value = _uiState.value.copy(userTranscript = "")
+            commandSpeechRecognizer?.setSuspended(false)
+            if (wakeWordSessionActive) {
+                viewModelScope.launch {
+                    delay(250L)
+                    if (_uiState.value.isGeminiActive && wakeWordSessionActive) {
+                        stopSession()
+                    }
+                }
+            }
         }
 
         geminiService.onInputTranscription = { text ->
             val transcript = _uiState.value.userTranscript + text
-            if (hasWakeWord(transcript)) {
-                wakeWordDetectedForTurn = true
-            }
             _uiState.value = _uiState.value.copy(
                 userTranscript = transcript,
                 aiTranscript = ""
             )
+            val command = MeetingVoiceCommandParser.parse(transcript)
+            if (command != null && command != lastHandledVoiceCommand) {
+                lastHandledVoiceCommand = command
+                _voiceCommands.tryEmit(command)
+            }
         }
 
         geminiService.onOutputTranscription = { text ->
@@ -112,7 +151,7 @@ class GeminiSessionViewModel : ViewModel() {
             )
         }
 
-        geminiService.onDisconnected = { reason ->
+            geminiService.onDisconnected = { reason ->
             if (_uiState.value.isGeminiActive && !userRequestedStop) {
                 scheduleReconnect(reason)
             }
@@ -131,23 +170,9 @@ class GeminiSessionViewModel : ViewModel() {
             )
 
             geminiService.onToolCall = toolCallHandler@{ toolCall ->
-                if (!wakeWordDetectedForTurn) {
-                    Log.d(TAG, "Ignoring tool call because the current turn has no wake word")
-                    for (call in toolCall.functionCalls) {
-                        geminiService.sendToolResponse(
-                            ToolCallRouter.buildImmediateResponse(
-                                call,
-                                ToolResult.Failure(
-                                    "Ignored because the user did not start this turn with the wake word 자비스."
-                                ),
-                            )
-                        )
-                    }
-                    return@toolCallHandler
-                }
-
                 inFlightToolCalls += toolCall.functionCalls.size
                 inputAudioSuspended = true
+                commandSpeechRecognizer?.setSuspended(true)
                 Log.d(TAG, "Suspending Gemini input for ${toolCall.functionCalls.size} tool call(s)")
                 for (call in toolCall.functionCalls) {
                     toolCallRouter?.handleToolCall(call) { response ->
@@ -178,7 +203,10 @@ class GeminiSessionViewModel : ViewModel() {
             }
 
             // Connect to Gemini
-            geminiService.connect { setupOk ->
+            geminiService.connect(
+                requireWakeWord = wakeWordSessionActive,
+                speechContextHint = contactActionManager.speechContextHint(),
+            ) { setupOk ->
                 if (!setupOk) {
                     val msg = when (val state = geminiService.connectionState.value) {
                         is GeminiConnectionState.Error -> state.message
@@ -194,10 +222,16 @@ class GeminiSessionViewModel : ViewModel() {
                     return@connect
                 }
 
-                // Start mic capture
+                // Gemini keeps audio output, while Android ko-KR SpeechRecognizer handles user input.
                 try {
-                    audioManager.startCapture()
+                    audioManager.startPlayback()
+                    commandSpeechRecognizer?.start()
                     reconnectAttempts = 0
+                    pendingInitialText?.let { firstQuery ->
+                        _uiState.value = _uiState.value.copy(userTranscript = firstQuery)
+                        geminiService.sendTextMessage(firstQuery)
+                        pendingInitialText = null
+                    }
                 } catch (e: Exception) {
                     _uiState.value = _uiState.value.copy(
                         errorMessage = "Mic capture failed: ${e.message}"
@@ -225,12 +259,20 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     fun stopSession() {
-        userRequestedStop = true
+        stopSession(userInitiated = true)
+    }
+
+    fun stopSession(userInitiated: Boolean) {
+        if (userInitiated) {
+            userRequestedStop = true
+        }
         reconnectJob?.cancel()
         reconnectJob = null
         eventClient.disconnect()
         toolCallRouter?.cancelAll()
         toolCallRouter = null
+        commandSpeechRecognizer?.stop()
+        commandSpeechRecognizer = null
         audioManager.stopCapture()
         geminiService.disconnect()
         stateObservationJob?.cancel()
@@ -238,8 +280,37 @@ class GeminiSessionViewModel : ViewModel() {
         visualContextSentForTurn = false
         inputAudioSuspended = false
         inFlightToolCalls = 0
-        wakeWordDetectedForTurn = false
+        wakeWordSessionActive = false
+        pendingInitialText = null
+        lastHandledVoiceCommand = null
+        lastSentSpeechText = null
+        lastSentSpeechAt = 0L
         _uiState.value = GeminiUiState()
+    }
+
+    private fun handleRecognizedSpeech(rawText: String) {
+        val text = rawText.trim()
+        if (text.isBlank()) return
+        val now = System.currentTimeMillis()
+        if (text == lastSentSpeechText && now - lastSentSpeechAt < 2_000L) return
+        lastSentSpeechText = text
+        lastSentSpeechAt = now
+
+        _uiState.value = _uiState.value.copy(
+            userTranscript = text,
+            aiTranscript = "",
+        )
+
+        val command = MeetingVoiceCommandParser.parse(text)
+        if (command != null && command != lastHandledVoiceCommand) {
+            lastHandledVoiceCommand = command
+            _voiceCommands.tryEmit(command)
+            return
+        }
+
+        if (_uiState.value.connectionState == GeminiConnectionState.Ready && !geminiService.isModelSpeaking.value) {
+            geminiService.sendTextMessage(text)
+        }
     }
 
     private fun scheduleReconnect(reason: String?) {
@@ -252,6 +323,7 @@ class GeminiSessionViewModel : ViewModel() {
             return
         }
         reconnectAttempts += 1
+        val resumeWakeWordMode = wakeWordSessionActive
         reconnectJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 errorMessage = "Gemini disconnected. Reconnecting..."
@@ -259,6 +331,8 @@ class GeminiSessionViewModel : ViewModel() {
             eventClient.disconnect()
             toolCallRouter?.cancelAll()
             toolCallRouter = null
+            commandSpeechRecognizer?.stop()
+            commandSpeechRecognizer = null
             audioManager.stopCapture()
             geminiService.disconnect()
             stateObservationJob?.cancel()
@@ -266,10 +340,13 @@ class GeminiSessionViewModel : ViewModel() {
             visualContextSentForTurn = false
             inputAudioSuspended = false
             inFlightToolCalls = 0
-            wakeWordDetectedForTurn = false
+            pendingInitialText = null
+            lastHandledVoiceCommand = null
+            lastSentSpeechText = null
+            lastSentSpeechAt = 0L
             _uiState.value = GeminiUiState()
             delay(1_200L)
-            startSession()
+            startSession(wakeWordInitiated = resumeWakeWordMode)
         }
     }
 
@@ -282,8 +359,59 @@ class GeminiSessionViewModel : ViewModel() {
     private suspend fun handleLocalToolCall(call: GeminiFunctionCall): ToolResult {
         return when (call.name) {
             "capture_current_view" -> captureCurrentView(call)
+            "call_contact" -> callContact(call)
+            "text_contact" -> textContact(call)
+            "create_contact" -> createContact(call)
+            "create_calendar_event" -> createCalendarEvent(call)
             else -> ToolResult.Failure("Unknown local tool: ${call.name}")
         }
+    }
+
+    private suspend fun callContact(call: GeminiFunctionCall): ToolResult {
+        val query = call.args["query"]?.toString()?.trim().orEmpty()
+        if (query.isBlank()) {
+            return ToolResult.Failure("전화할 연락처 이름을 알려주세요.")
+        }
+        return contactActionManager.callContact(query)
+    }
+
+    private suspend fun textContact(call: GeminiFunctionCall): ToolResult {
+        val query = call.args["query"]?.toString()?.trim().orEmpty()
+        val message = call.args["message"]?.toString()?.trim().orEmpty()
+        if (query.isBlank()) {
+            return ToolResult.Failure("문자를 보낼 연락처 이름을 알려주세요.")
+        }
+        return contactActionManager.textContact(query, message)
+    }
+
+    private suspend fun createContact(call: GeminiFunctionCall): ToolResult {
+        val name = call.args["name"]?.toString()?.trim().orEmpty()
+        if (name.isBlank()) {
+            return ToolResult.Failure("저장할 연락처 이름을 알려주세요.")
+        }
+        return contactActionManager.createContact(
+            name = name,
+            phone = call.args["phone"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            email = call.args["email"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            org = call.args["org"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            role = call.args["role"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            notes = call.args["notes"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    private suspend fun createCalendarEvent(call: GeminiFunctionCall): ToolResult {
+        val title = call.args["title"]?.toString()?.trim().orEmpty()
+        val startAt = call.args["start_at"]?.toString()?.trim().orEmpty()
+        if (title.isBlank() || startAt.isBlank()) {
+            return ToolResult.Failure("일정 제목과 시작 시간이 필요합니다.")
+        }
+        return calendarActionManager.createEvent(
+            title = title,
+            startAt = startAt,
+            endAt = call.args["end_at"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            location = call.args["location"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            description = call.args["description"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+        )
     }
 
     private suspend fun captureCurrentView(call: GeminiFunctionCall): ToolResult {
@@ -321,16 +449,10 @@ class GeminiSessionViewModel : ViewModel() {
             delay(800L)
             if (_uiState.value.isGeminiActive) {
                 inputAudioSuspended = false
+                commandSpeechRecognizer?.setSuspended(false)
                 Log.d(TAG, "Resumed Gemini input after tool response")
             }
         }
-    }
-
-    private fun hasWakeWord(transcript: String): Boolean {
-        val normalized = transcript
-            .lowercase()
-            .replace(Regex("[^가-힣a-z0-9]"), "")
-        return normalized.startsWith("자비스") || normalized.startsWith("jarvis")
     }
 
     override fun onCleared() {

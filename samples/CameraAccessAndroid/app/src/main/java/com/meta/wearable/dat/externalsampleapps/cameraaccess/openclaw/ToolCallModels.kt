@@ -107,6 +107,10 @@ sealed class OpenClawConnectionState {
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray = JSONArray()
         .put(captureCurrentView())
+        .put(callContact())
+        .put(textContact())
+        .put(createContact())
+        .put(createCalendarEvent())
         .put(savePerson())
         .put(saveMeeting())
         .put(saveMemory())
@@ -206,6 +210,48 @@ object ToolDeclarations {
             .put("role", strProp("직책/역할 (선택)"))
             .put("notes_summary", strProp("간단한 요약/메모 (선택)")),
         required = listOf("name"),
+    )
+
+    private fun callContact() = decl(
+        name = "call_contact",
+        description = "사용자의 Android 전화번호부에서 연락처를 찾아 즉시 전화를 겁니다. 예: '김민수한테 전화해줘', '박부장님 연결해줘'. 여러 명이면 다시 확인하세요.",
+        properties = JSONObject()
+            .put("query", strProp("연락처 이름 또는 전화번호 일부")),
+        required = listOf("query"),
+    )
+
+    private fun textContact() = decl(
+        name = "text_contact",
+        description = "사용자의 Android 전화번호부에서 연락처를 찾아 SMS 문자를 즉시 전송합니다. 예: '김민수에게 문자 보내줘, 10분 늦어요'. 여러 명이면 다시 확인하세요.",
+        properties = JSONObject()
+            .put("query", strProp("연락처 이름 또는 전화번호 일부"))
+            .put("message", strProp("보낼 문자 초안")),
+        required = listOf("query", "message"),
+    )
+
+    private fun createContact() = decl(
+        name = "create_contact",
+        description = "Android 연락처 앱의 새 연락처 등록 화면을 엽니다. 사용자가 이름/전화번호/회사/직책을 알려주고 연락처에 저장하라고 할 때 사용하세요. 앱이 바로 자동 저장하지 않고 사용자가 확인 후 저장합니다.",
+        properties = JSONObject()
+            .put("name", strProp("연락처 이름"))
+            .put("phone", strProp("전화번호 (선택)"))
+            .put("email", strProp("이메일 (선택)"))
+            .put("org", strProp("회사/소속 (선택)"))
+            .put("role", strProp("직책 (선택)"))
+            .put("notes", strProp("메모 (선택)")),
+        required = listOf("name"),
+    )
+
+    private fun createCalendarEvent() = decl(
+        name = "create_calendar_event",
+        description = "Android/Google 캘린더 앱의 일정 등록 화면을 엽니다. 사용자가 '내일 오후 4시에 OO에서 미팅 캘린더에 넣어줘'처럼 말하면 한국 시간 기준 ISO 8601로 start_at을 계산해 호출하세요. 사용자가 직접 확인 후 저장합니다.",
+        properties = JSONObject()
+            .put("title", strProp("일정 제목. 예: '미팅', '김윤섭 미팅'"))
+            .put("start_at", strProp("시작 시각 ISO 8601. 한국 시간은 +09:00 포함. 예: 2026-06-18T16:00:00+09:00"))
+            .put("end_at", strProp("종료 시각 ISO 8601 (선택). 없으면 앱이 1시간 일정으로 엽니다."))
+            .put("location", strProp("장소 (선택)"))
+            .put("description", strProp("일정 설명/메모 (선택)")),
+        required = listOf("title", "start_at"),
     )
 
     private fun searchPeople() = decl(

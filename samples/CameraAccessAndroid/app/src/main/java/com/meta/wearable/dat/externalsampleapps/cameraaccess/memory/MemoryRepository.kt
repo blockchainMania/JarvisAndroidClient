@@ -10,8 +10,8 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Request
 import org.json.JSONObject
 
 class MemoryRepository {
@@ -41,6 +41,56 @@ class MemoryRepository {
             items.add(parseMemory(wrapper.getJSONObject("memory")))
         }
         return items
+    }
+
+    fun get(memoryId: String): MemoryItem {
+        val request = Request.Builder()
+            .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/$memoryId")
+            .get()
+            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .build()
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IllegalStateException("HTTP ${response.code}: ${responseBody.take(160)}")
+            }
+            return parseMemory(JSONObject(responseBody))
+        }
+    }
+
+    fun update(memory: MemoryItem): MemoryItem {
+        val body = JSONObject()
+            .put("captured_at", memory.capturedAt)
+            .put("user_note", memory.userNote ?: JSONObject.NULL)
+            .put("ai_interpretation", memory.aiInterpretation ?: JSONObject.NULL)
+            .put("people_text", memory.peopleText ?: JSONObject.NULL)
+        val request = Request.Builder()
+            .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/${memory.id}")
+            .put(body.toString().toRequestBody(jsonMediaType))
+            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Content-Type", "application/json")
+            .build()
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IllegalStateException("HTTP ${response.code}: ${responseBody.take(160)}")
+            }
+            return parseMemory(JSONObject(responseBody))
+        }
+    }
+
+    fun delete(memoryId: String) {
+        val request = Request.Builder()
+            .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/$memoryId")
+            .delete()
+            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val responseBody = response.body?.string().orEmpty()
+                throw IllegalStateException("HTTP ${response.code}: ${responseBody.take(160)}")
+            }
+        }
     }
 
     private fun postMemories(path: String, body: JSONObject): List<MemoryItem> {
@@ -76,10 +126,12 @@ class MemoryRepository {
             capturedAt = capturedAt,
             capturedAtDisplay = formatKst(capturedAt, metadata.optString("captured_at_kst")),
             text = json.optString("text"),
+            source = json.optString("source"),
             userNote = metadata.optString("user_note").ifBlank { null },
             aiInterpretation = metadata.optString("ai_interpretation").ifBlank { null },
             peopleText = metadata.optString("people_text").ifBlank { null },
             imageFilename = metadata.optString("image_filename").ifBlank { null },
+            labels = metadata.optJSONArray("labels").toStringList(),
         )
     }
 
@@ -95,6 +147,13 @@ class MemoryRepository {
             return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         }
     }
+
+    private fun org.json.JSONArray?.toStringList(): List<String> =
+        if (this == null) {
+            emptyList()
+        } else {
+            (0 until length()).mapNotNull { index -> optString(index).takeIf { it.isNotBlank() } }
+        }
 
     private fun formatKst(capturedAt: String, capturedAtKst: String): String {
         val source = capturedAtKst.ifBlank { capturedAt }
