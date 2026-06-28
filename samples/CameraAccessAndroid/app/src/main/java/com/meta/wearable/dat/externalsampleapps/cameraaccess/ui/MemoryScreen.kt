@@ -29,9 +29,14 @@ import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Groups2
+import androidx.compose.material.icons.filled.ImageSearch
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -481,6 +486,10 @@ private fun MemoryCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             MemoryThumbnail(filename = memory.imageFilename)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = {}, label = { Text(memory.memoryTypeLabel()) })
+                AssistChip(onClick = {}, label = { Text(memory.capturedAtDisplay) })
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -494,13 +503,7 @@ private fun MemoryCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = memory.capturedAtDisplay,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
-                AssistChip(onClick = {}, label = { Text(memory.source) })
             }
             memory.aiInterpretation?.let {
                 Text(
@@ -511,6 +514,13 @@ private fun MemoryCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            Text(
+                text = "이 기억은 ${memory.recallHint()}로 다시 찾기 쉽습니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (memory.labels.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     memory.labels.take(4).forEach { label ->
@@ -535,13 +545,43 @@ private fun MemoryDetail(
             MemoryThumbnail(filename = memory.imageFilename, large = true)
         }
         item {
-            DetailSection("메모", memory.userNote ?: memory.text)
+            MemoryRecallHeader(memory = memory)
+        }
+        item {
+            DetailSection("사용자 메모", memory.userNote ?: memory.text)
         }
         memory.aiInterpretation?.let {
-            item { DetailSection("AI 해석", it) }
+            item {
+                IconDetailSection(
+                    title = "AI 장면 해석",
+                    body = it,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.ImageSearch,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                )
+            }
         }
         memory.peopleText?.let {
-            item { DetailSection("관련 사람", it) }
+            item {
+                IconDetailSection(
+                    title = "관련 사람",
+                    body = it,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.PersonSearch,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                )
+            }
+        }
+        item {
+            RecallExamplesCard(memory = memory)
         }
         item {
             ElevatedCard(modifier = Modifier.fillMaxWidth()) {
@@ -549,6 +589,81 @@ private fun MemoryDetail(
                     Text("기본 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     MetadataRow("저장 시간", memory.capturedAtDisplay)
                     MetadataRow("출처", memory.source)
+                    MetadataRow("유형", memory.memoryTypeLabel())
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MemoryRecallHeader(memory: MemoryItem) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lightbulb,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "이 기억",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text(
+                text = memory.userNote ?: memory.aiInterpretation ?: memory.text,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${memory.capturedAtDisplay}에 저장된 ${memory.memoryTypeLabel()}입니다.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                memory.labels.take(6).forEach { label ->
+                    AssistChip(onClick = {}, label = { Text(label) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecallExamplesCard(memory: MemoryItem) {
+    val examples = memory.recallExamples()
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "이렇게 다시 물어보세요",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            examples.forEach { example ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text(
+                        text = example,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }
@@ -618,6 +733,7 @@ private fun MeetingCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MeetingDetail(
     meeting: MeetingHistoryItem,
@@ -642,6 +758,53 @@ private fun MeetingDetail(
                 body = meeting.markdownSummary ?: meeting.summary.orEmpty(),
             )
         }
+        if (meeting.actionItems.isNotEmpty()) {
+            item {
+                StructuredListCard(
+                    title = "Action Item",
+                    items = meeting.actionItems,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.TaskAlt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                )
+            }
+        }
+        if (meeting.decisions.isNotEmpty()) {
+            item {
+                StructuredListCard(
+                    title = "결정 사항",
+                    items = meeting.decisions,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                )
+            }
+        }
+        if (meeting.keywords.isNotEmpty()) {
+            item {
+                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("키워드", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            meeting.keywords.forEach { keyword ->
+                                AssistChip(onClick = {}, label = { Text(keyword) })
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if (meeting.transcript?.isNotBlank() == true) {
             item {
                 DetailSection("회의록 원문", meeting.transcript)
@@ -662,6 +825,64 @@ private fun DetailSection(
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(body, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun IconDetailSection(
+    title: String,
+    body: String,
+    icon: @Composable () -> Unit,
+) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                icon()
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            Text(body, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun StructuredListCard(
+    title: String,
+    items: List<String>,
+    icon: @Composable () -> Unit,
+) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                icon()
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            items.forEach { item ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text(
+                        text = item,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
     }
 }
@@ -850,4 +1071,39 @@ private fun MemoryThumbnail(
             contentScale = ContentScale.Crop,
         )
     }
+}
+
+private fun MemoryItem.memoryTypeLabel(): String {
+    val normalized = labels.map { it.lowercase() }
+    return when {
+        normalized.any { it.contains("business_card") } -> "명함"
+        normalized.any { it.contains("document") } -> "문서"
+        normalized.any { it.contains("person") } -> "사람"
+        normalized.any { it.contains("vehicle") } -> "차량"
+        normalized.any { it.contains("food") } -> "음식"
+        normalized.any { it.contains("place") } -> "장소"
+        source == "voice" -> "음성 기억"
+        source == "camera" -> "시야 기억"
+        else -> "기억"
+    }
+}
+
+private fun MemoryItem.recallHint(): String {
+    val key = userNote
+        ?: peopleText
+        ?: labels.firstOrNull()
+        ?: text.lineSequence().firstOrNull()
+        ?: "저장한 내용"
+    return key.take(24)
+}
+
+private fun MemoryItem.recallExamples(): List<String> {
+    val type = memoryTypeLabel()
+    val hint = recallHint()
+    val label = labels.firstOrNull()?.replace("_", " ")
+    return listOfNotNull(
+        "\"$hint\" 찾아줘",
+        if (type != "기억") "\"지난번 저장한 $type\" 보여줘" else null,
+        if (!label.isNullOrBlank()) "\"$label 관련해서 저장한 거 뭐였지?\"" else null,
+    ).distinct().take(3)
 }

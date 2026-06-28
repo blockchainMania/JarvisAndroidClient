@@ -143,7 +143,7 @@ fun HomeScreen(
 
         // Phone mode button
         SwitchButton(
-            label = "Start on Phone",
+            label = "폰 카메라로 테스트",
             onClick = { viewModel.navigateToPhoneMode() },
         )
       }

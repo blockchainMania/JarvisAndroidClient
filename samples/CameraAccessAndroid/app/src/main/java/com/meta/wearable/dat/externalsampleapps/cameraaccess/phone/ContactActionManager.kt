@@ -11,6 +11,8 @@ import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.AppContextProvider
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 class ContactActionManager {
     private val context
@@ -84,6 +86,39 @@ class ContactActionManager {
         }
         context.startActivity(intent)
         return ToolResult.Success("$name 연락처 등록 화면을 열었습니다. 내용을 확인한 뒤 저장해주세요.")
+    }
+
+    fun searchContacts(query: String, limit: Int = 5): ToolResult {
+        if (!hasContactsPermission()) {
+            return ToolResult.Failure("전화번호부 권한이 없습니다. 연락처 권한을 허용한 뒤 다시 시도해주세요.")
+        }
+        if (query.isBlank()) {
+            return ToolResult.Failure("검색할 연락처 이름을 알려주세요.")
+        }
+        val matches = findMatches(query).take(limit.coerceIn(1, 10))
+        val candidates = JSONArray().apply {
+            matches.forEachIndexed { index, match ->
+                put(
+                    JSONObject()
+                        .put("rank", index + 1)
+                        .put("display_name", match.displayName)
+                        .put("phone_number", maskPhoneNumber(match.phoneNumber))
+                )
+            }
+        }
+        return ToolResult.Success(
+            JSONObject()
+                .put("query", query)
+                .put("count", matches.size)
+                .put("candidates", candidates)
+                .toString()
+        )
+    }
+
+    private fun maskPhoneNumber(value: String): String {
+        val digits = value.filter { it.isDigit() }
+        if (digits.length < 4) return value
+        return value.replace(Regex("\\d(?=\\d{4})"), "*")
     }
 
     fun speechContextHint(limit: Int = 80): String {
@@ -176,8 +211,52 @@ class ContactActionManager {
             }
         }
 
+        if (matches.isEmpty()) {
+            collectAllContacts()
+                .filter { contact ->
+                    normalize(contact.displayName).contains(normalizedQuery) ||
+                        normalizedQuery.contains(normalize(contact.displayName))
+                }
+                .forEach { contact ->
+                    matches.putIfAbsent(
+                        "${contact.displayName}::${normalizeNumber(contact.phoneNumber)}",
+                        contact,
+                    )
+                }
+        }
+
         val exactNameMatches = matches.values.filter { normalize(it.displayName) == normalizedQuery }
         return if (exactNameMatches.isNotEmpty()) exactNameMatches else matches.values.toList()
+    }
+
+    private fun collectAllContacts(): List<ContactMatch> {
+        val contacts = linkedMapOf<String, ContactMatch>()
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.LOOKUP_KEY,
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+        )
+        context.contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            projection,
+            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} IS NOT NULL",
+            null,
+            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC",
+        )?.use { cursor ->
+            val lookupKeyIndex = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.LOOKUP_KEY)
+            val displayNameIndex = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberIndex = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) {
+                val displayName = cursor.getString(displayNameIndex).orEmpty().trim()
+                val phoneNumber = cursor.getString(numberIndex).orEmpty().trim()
+                if (displayName.isBlank() || phoneNumber.isBlank()) continue
+                contacts.putIfAbsent(
+                    "${cursor.getString(lookupKeyIndex).orEmpty()}::${normalizeNumber(phoneNumber)}",
+                    ContactMatch(displayName, phoneNumber),
+                )
+            }
+        }
+        return contacts.values.toList()
     }
 
     private fun launchCallIntent(phoneNumber: String) {

@@ -88,6 +88,7 @@ class ToolCallRouter(
 
     private val LOCAL_TOOL_NAMES = setOf(
         "capture_current_view",
+        "search_contacts",
         "call_contact",
         "text_contact",
         "create_contact",

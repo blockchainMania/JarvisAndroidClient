@@ -2,26 +2,26 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" project="cameraaccess">
 
     <!-- Home Screen -->
-    <string name="register_button_title" description="Connect App">Connect my glasses</string>
+    <string name="register_button_title" description="Connect App">글라스 연결하기</string>
     <string name="unregister_button_title" description="Disconnect App">Disconnect</string>
-    <string name="stream_button_title" description="Start streaming">Start streaming</string>
-    <string name="stop_stream_button_title" description="Stop streaming">Stop streaming</string>
-    <string name="home_tip_video_title" description="Tip title about video capture">Video Capture</string>
-    <string name="home_tip_audio_title" description="Tip title about audio">Open-Ear Audio</string>
-    <string name="home_tip_hands_title" description="Tip title about hands free">Enjoy On-the-Go</string>
-    <string name="home_tip_video" description="Tip about video capture">Record videos directly from your glasses, from your point of view.</string>
-    <string name="home_tip_audio" description="Tip about audio">Hear notifications while keeping your ears open to the world around you.</string>
-    <string name="home_tip_hands" description="Tip about hands free">Stay hands-free while you move through your day. Move freely, stay connected.</string>
-    <string name="home_redirect_message" description="Redirect message">You\'ll be redirected to the Meta AI app to confirm your connection.</string>
+    <string name="stream_button_title" description="Start streaming">글라스로 Jarvis 시작</string>
+    <string name="stop_stream_button_title" description="Stop streaming">Jarvis 종료</string>
+    <string name="home_tip_video_title" description="Tip title about video capture">보고 있는 장면 이해</string>
+    <string name="home_tip_audio_title" description="Tip title about audio">말로 묻고 듣기</string>
+    <string name="home_tip_hands_title" description="Tip title about hands free">기억하고 다시 찾기</string>
+    <string name="home_tip_video" description="Tip about video capture">필요할 때만 현재 시야를 캡처해 물건, 문서, 명함, 상황을 해석합니다.</string>
+    <string name="home_tip_audio" description="Tip about audio">자비스를 부르거나 AI 버튼을 눌러 질문하고, 답변은 스피커로 듣습니다.</string>
+    <string name="home_tip_hands" description="Tip about hands free">중요한 장면과 회의를 저장하고, 나중에 자연어로 다시 찾습니다.</string>
+    <string name="home_redirect_message" description="Redirect message">Meta AI 앱에서 글라스 연결을 확인한 뒤 Jarvis를 시작합니다.</string>
 
     <!-- Stream Screen -->
     <string name="live_stream" description="Live Stream">Live stream</string>
 
     <!-- Non Stream Screen -->
-    <string name="camera_access_icon_description" description="Camera Access icon description">Camera Access icon</string>
-    <string name="non_stream_screen_description" description="Non stream screen description">Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.</string>
-    <string name="non_stream_screen_title" description="Non stream screen title">Stream Your Glasses Camera</string>
-    <string name="waiting_for_active_device" description="Waiting for active device message">Waiting for an active device</string>
+    <string name="camera_access_icon_description" description="Camera Access icon description">Jarvis icon</string>
+    <string name="non_stream_screen_description" description="Non stream screen description">글라스를 연결하면 Jarvis가 현재 시야 질문, 기억 저장, 회의 기록을 처리할 수 있습니다.</string>
+    <string name="non_stream_screen_title" description="Non stream screen title">Jarvis OS</string>
+    <string name="waiting_for_active_device" description="Waiting for active device message">연결된 글라스를 기다리는 중</string>
 
     <!-- SharePhotoDialog -->
     <string name="photo_captured" description="Photo Captured">Photo Captured</string>
@@ -49,9 +49,9 @@
     <string name="no_captured_image" description="No captured image">No captured image</string>
 
     <!-- Getting Started Sheet -->
-    <string name="getting_started_title" description="Getting Started sheet title">Getting started</string>
-    <string name="getting_started_tip_permission" description="Tip about camera permission">First, Camera Access needs permission to use your glasses camera.</string>
-    <string name="getting_started_tip_led" description="Tip about capture LED">The capture LED lets others know when you\'re capturing content or going live.</string>
-    <string name="getting_started_tip_photo" description="Tip about photo capture">Capture photos by tapping the camera button.</string>
-    <string name="getting_started_continue" description="Continue button">Continue</string>
+    <string name="getting_started_title" description="Getting Started sheet title">Jarvis 시작 전 확인</string>
+    <string name="getting_started_tip_permission" description="Tip about camera permission">현재 시야 질문과 저장을 위해 글라스 카메라 권한이 필요합니다.</string>
+    <string name="getting_started_tip_led" description="Tip about capture LED">캡처가 필요할 때는 글라스 LED가 켜질 수 있습니다.</string>
+    <string name="getting_started_tip_photo" description="Tip about photo capture">Jarvis는 영상을 계속 보내지 않고, 필요한 순간의 이미지 캡처를 사용합니다.</string>
+    <string name="getting_started_continue" description="Continue button">시작하기</string>
 </resources>

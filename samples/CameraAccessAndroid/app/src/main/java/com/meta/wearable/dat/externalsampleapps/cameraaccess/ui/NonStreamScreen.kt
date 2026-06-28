@@ -50,7 +50,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -80,14 +79,20 @@ fun NonStreamScreen(
   val context = LocalContext.current
 
   MaterialTheme(colorScheme = darkColorScheme()) {
-    Box(
-        modifier = modifier.fillMaxSize().background(Color.Black).padding(all = 24.dp),
-        contentAlignment = Alignment.Center,
+    Column(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .systemBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      // Top bar: settings + disconnect
       Row(
-          modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding(),
-          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically,
       ) {
         IconButton(onClick = { viewModel.showMemory() }) {
           Icon(
@@ -142,15 +147,21 @@ fun NonStreamScreen(
       }
 
       Column(
+          modifier =
+              Modifier
+                  .weight(1f)
+                  .fillMaxWidth()
+                  .padding(vertical = 20.dp),
           horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.Center,
       ) {
         Icon(
             painter = painterResource(id = R.drawable.camera_access_icon),
             contentDescription = stringResource(R.string.camera_access_icon_description),
             tint = Color.White,
-            modifier = Modifier.size(80.dp * LocalDensity.current.density),
+            modifier = Modifier.size(176.dp),
         )
+        Spacer(modifier = Modifier.height(28.dp))
         Text(
             text = stringResource(R.string.non_stream_screen_title),
             style = MaterialTheme.typography.headlineSmall,
@@ -158,15 +169,17 @@ fun NonStreamScreen(
             textAlign = TextAlign.Center,
             color = Color.White,
         )
+        Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = stringResource(R.string.non_stream_screen_description),
+            style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = Color.White,
         )
       }
 
       Column(
-          modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+          modifier = Modifier.fillMaxWidth(),
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
@@ -199,26 +212,25 @@ fun NonStreamScreen(
 
         // Start on Phone Button
         SwitchButton(
-            label = "Start on Phone",
+            label = "폰 카메라로 테스트",
             onClick = { viewModel.navigateToPhoneMode() },
         )
       }
+    }
 
-      // Getting Started Sheet
-      if (uiState.isGettingStartedSheetVisible) {
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.hideGettingStartedSheet() },
-            sheetState = gettingStartedSheetState,
-        ) {
-          GettingStartedSheetContent(
-              onContinue = {
-                scope.launch {
-                  gettingStartedSheetState.hide()
-                  viewModel.hideGettingStartedSheet()
-                }
+    if (uiState.isGettingStartedSheetVisible) {
+      ModalBottomSheet(
+          onDismissRequest = { viewModel.hideGettingStartedSheet() },
+          sheetState = gettingStartedSheetState,
+      ) {
+        GettingStartedSheetContent(
+            onContinue = {
+              scope.launch {
+                gettingStartedSheetState.hide()
+                viewModel.hideGettingStartedSheet()
               }
-          )
-        }
+            }
+        )
       }
     }
   }

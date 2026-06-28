@@ -16,7 +16,7 @@ class KoreanSpeechRecognizer(
     private val onPartialText: (String) -> Unit,
     private val onFinalText: (String) -> Unit,
     private val onErrorText: (String) -> Unit,
-) {
+) : SpeechInputController {
     companion object {
         private const val TAG = "KoreanSpeechRecognizer"
         private const val RESTART_DELAY_MS = 250L
@@ -32,7 +32,7 @@ class KoreanSpeechRecognizer(
     @Volatile
     private var suspended = false
 
-    fun start() {
+    override fun start() {
         if (running) return
         if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
             onErrorText("Android 음성인식을 사용할 수 없습니다.")
@@ -45,7 +45,7 @@ class KoreanSpeechRecognizer(
         }
     }
 
-    fun setSuspended(value: Boolean) {
+    override fun setSuspended(value: Boolean) {
         if (suspended == value) return
         suspended = value
         mainHandler.post {
@@ -57,7 +57,7 @@ class KoreanSpeechRecognizer(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         running = false
         suspended = false
         mainHandler.removeCallbacksAndMessages(null)
@@ -107,9 +107,9 @@ class KoreanSpeechRecognizer(
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2_800L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2_000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1_200L)
         }
         try {
             recognizer.startListening(intent)

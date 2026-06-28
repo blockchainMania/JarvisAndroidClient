@@ -98,7 +98,7 @@ fun GeminiStatusBar(
 
         if (openClawState !is OpenClawConnectionState.NotConfigured) {
             StatusPill(
-                label = "OpenClaw",
+                label = "Jarvis",
                 color = when (openClawState) {
                     is OpenClawConnectionState.Connected -> Color(0xFF4CAF50)
                     is OpenClawConnectionState.Checking -> Color(0xFFFF9800)

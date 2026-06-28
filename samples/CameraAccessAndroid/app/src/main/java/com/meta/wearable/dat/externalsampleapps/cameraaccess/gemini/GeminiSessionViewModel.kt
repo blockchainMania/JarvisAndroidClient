@@ -19,6 +19,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingVoic
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.CalendarActionManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactActionManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.whisper.WhisperSpeechRecognizer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +40,18 @@ data class GeminiUiState(
     val aiTranscript: String = "",
     val toolCallStatus: ToolCallStatus = ToolCallStatus.Idle,
     val openClawConnectionState: OpenClawConnectionState = OpenClawConnectionState.NotConfigured,
+    val pendingContactAction: PendingContactAction? = null,
+)
+
+enum class PendingContactActionType {
+    CALL,
+    TEXT,
+}
+
+data class PendingContactAction(
+    val type: PendingContactActionType,
+    val query: String,
+    val message: String? = null,
 )
 
 class GeminiSessionViewModel : ViewModel() {
@@ -56,7 +69,7 @@ class GeminiSessionViewModel : ViewModel() {
     private val calendarActionManager = CalendarActionManager()
     private val audioManager = AudioManager()
     private val eventClient = OpenClawEventClient()
-    private var commandSpeechRecognizer: KoreanSpeechRecognizer? = null
+    private var commandSpeechRecognizer: SpeechInputController? = null
     private var visualContextSentForTurn: Boolean = false
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
@@ -70,6 +83,9 @@ class GeminiSessionViewModel : ViewModel() {
     private var lastHandledVoiceCommand: MeetingVoiceCommand? = null
     private var lastSentSpeechText: String? = null
     private var lastSentSpeechAt: Long = 0L
+    private var pendingSpeechText: String? = null
+    private var pendingSpeechJob: Job? = null
+    private var usingFallbackAndroidStt: Boolean = false
 
     private val _voiceCommands = MutableSharedFlow<MeetingVoiceCommand>(extraBufferCapacity = 4)
     val voiceCommands: SharedFlow<MeetingVoiceCommand> = _voiceCommands.asSharedFlow()
@@ -81,6 +97,7 @@ class GeminiSessionViewModel : ViewModel() {
         userRequestedStop = false
         wakeWordSessionActive = wakeWordInitiated
         pendingInitialText = initialText?.trim().orEmpty().ifBlank { null }
+        usingFallbackAndroidStt = false
 
         if (!GeminiConfig.isConfigured) {
             _uiState.value = _uiState.value.copy(
@@ -92,20 +109,14 @@ class GeminiSessionViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(isGeminiActive = true)
 
         commandSpeechRecognizer?.stop()
-        commandSpeechRecognizer = KoreanSpeechRecognizer(
-            context = AppContextProvider.require(),
-            onPartialText = { text ->
-                _uiState.value = _uiState.value.copy(
-                    userTranscript = text,
-                    aiTranscript = "",
-                )
+        commandSpeechRecognizer = createSpeechInputController()
+        _uiState.value = _uiState.value.copy(
+            userTranscript = if (SettingsManager.speechRecognizerProvider == "whisper") {
+                "STT: Whisper.cpp"
+            } else {
+                "STT: Android ko-KR"
             },
-            onFinalText = { text ->
-                handleRecognizedSpeech(text)
-            },
-            onErrorText = { message ->
-                _uiState.value = _uiState.value.copy(errorMessage = message)
-            },
+            aiTranscript = "",
         )
 
         geminiService.onAudioReceived = { data ->
@@ -125,7 +136,11 @@ class GeminiSessionViewModel : ViewModel() {
             if (wakeWordSessionActive) {
                 viewModelScope.launch {
                     delay(250L)
-                    if (_uiState.value.isGeminiActive && wakeWordSessionActive) {
+                    if (
+                        _uiState.value.isGeminiActive &&
+                        wakeWordSessionActive &&
+                        _uiState.value.pendingContactAction == null
+                    ) {
                         stopSession()
                     }
                 }
@@ -285,11 +300,41 @@ class GeminiSessionViewModel : ViewModel() {
         lastHandledVoiceCommand = null
         lastSentSpeechText = null
         lastSentSpeechAt = 0L
+        pendingSpeechJob?.cancel()
+        pendingSpeechJob = null
+        pendingSpeechText = null
+        usingFallbackAndroidStt = false
         _uiState.value = GeminiUiState()
     }
 
     private fun handleRecognizedSpeech(rawText: String) {
         val text = rawText.trim()
+        if (text.isBlank()) return
+        val mergedText = mergePendingSpeech(text)
+        pendingSpeechText = mergedText
+        pendingSpeechJob?.cancel()
+        pendingSpeechJob = viewModelScope.launch {
+            delay(1_500L)
+            val pending = pendingSpeechText?.trim().orEmpty()
+            pendingSpeechText = null
+            pendingSpeechJob = null
+            sendRecognizedSpeech(pending)
+        }
+        _uiState.value = _uiState.value.copy(
+            userTranscript = mergedText,
+            aiTranscript = "",
+        )
+    }
+
+    private fun mergePendingSpeech(text: String): String {
+        val pending = pendingSpeechText?.trim().orEmpty()
+        if (pending.isBlank()) return text
+        if (text == pending || text.startsWith(pending)) return text
+        if (pending.endsWith(text)) return pending
+        return "$pending $text"
+    }
+
+    private fun sendRecognizedSpeech(text: String) {
         if (text.isBlank()) return
         val now = System.currentTimeMillis()
         if (text == lastSentSpeechText && now - lastSentSpeechAt < 2_000L) return
@@ -301,6 +346,20 @@ class GeminiSessionViewModel : ViewModel() {
             aiTranscript = "",
         )
 
+        val pendingContactAction = _uiState.value.pendingContactAction
+        if (pendingContactAction != null) {
+            when {
+                isContactActionCancel(text) -> {
+                    cancelPendingContactAction()
+                    return
+                }
+                isContactActionConfirm(text) -> {
+                    confirmPendingContactAction()
+                    return
+                }
+            }
+        }
+
         val command = MeetingVoiceCommandParser.parse(text)
         if (command != null && command != lastHandledVoiceCommand) {
             lastHandledVoiceCommand = command
@@ -310,6 +369,46 @@ class GeminiSessionViewModel : ViewModel() {
 
         if (_uiState.value.connectionState == GeminiConnectionState.Ready && !geminiService.isModelSpeaking.value) {
             geminiService.sendTextMessage(text)
+        }
+    }
+
+    private fun createSpeechInputController(): SpeechInputController {
+        val context = AppContextProvider.require()
+        val onPartial: (String) -> Unit = { text ->
+            _uiState.value = _uiState.value.copy(
+                userTranscript = text,
+                aiTranscript = "",
+            )
+        }
+        val onFinal: (String) -> Unit = { text -> handleRecognizedSpeech(text) }
+        val onError: (String) -> Unit = { message ->
+            if (
+                SettingsManager.speechRecognizerProvider == "whisper" &&
+                !usingFallbackAndroidStt &&
+                _uiState.value.isGeminiActive
+            ) {
+                usingFallbackAndroidStt = true
+                commandSpeechRecognizer?.stop()
+                commandSpeechRecognizer = KoreanSpeechRecognizer(
+                    context = context,
+                    onPartialText = onPartial,
+                    onFinalText = onFinal,
+                    onErrorText = { fallbackMessage ->
+                        _uiState.value = _uiState.value.copy(errorMessage = fallbackMessage)
+                    },
+                ).also { it.start() }
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = "$message Android STT로 전환합니다.",
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(errorMessage = message)
+            }
+        }
+
+        return if (SettingsManager.speechRecognizerProvider == "android" || usingFallbackAndroidStt) {
+            KoreanSpeechRecognizer(context, onPartial, onFinal, onError)
+        } else {
+            WhisperSpeechRecognizer(context, onPartial, onFinal, onError)
         }
     }
 
@@ -344,6 +443,7 @@ class GeminiSessionViewModel : ViewModel() {
             lastHandledVoiceCommand = null
             lastSentSpeechText = null
             lastSentSpeechAt = 0L
+            usingFallbackAndroidStt = false
             _uiState.value = GeminiUiState()
             delay(1_200L)
             startSession(wakeWordInitiated = resumeWakeWordMode)
@@ -359,6 +459,7 @@ class GeminiSessionViewModel : ViewModel() {
     private suspend fun handleLocalToolCall(call: GeminiFunctionCall): ToolResult {
         return when (call.name) {
             "capture_current_view" -> captureCurrentView(call)
+            "search_contacts" -> searchContacts(call)
             "call_contact" -> callContact(call)
             "text_contact" -> textContact(call)
             "create_contact" -> createContact(call)
@@ -367,12 +468,23 @@ class GeminiSessionViewModel : ViewModel() {
         }
     }
 
+    private suspend fun searchContacts(call: GeminiFunctionCall): ToolResult {
+        val query = call.args["query"]?.toString()?.trim().orEmpty()
+        val topK = call.args["top_k"]?.toString()?.toIntOrNull() ?: 5
+        return contactActionManager.searchContacts(query, topK)
+    }
+
     private suspend fun callContact(call: GeminiFunctionCall): ToolResult {
         val query = call.args["query"]?.toString()?.trim().orEmpty()
         if (query.isBlank()) {
             return ToolResult.Failure("전화할 연락처 이름을 알려주세요.")
         }
-        return contactActionManager.callContact(query)
+        val action = PendingContactAction(
+            type = PendingContactActionType.CALL,
+            query = query,
+        )
+        setPendingContactAction(action)
+        return ToolResult.Success("${query}에게 전화하기 전 사용자 확인을 기다리고 있습니다. 앱 화면에서 실행을 누르거나 '응, 전화해'라고 말하면 실행됩니다.")
     }
 
     private suspend fun textContact(call: GeminiFunctionCall): ToolResult {
@@ -381,7 +493,64 @@ class GeminiSessionViewModel : ViewModel() {
         if (query.isBlank()) {
             return ToolResult.Failure("문자를 보낼 연락처 이름을 알려주세요.")
         }
-        return contactActionManager.textContact(query, message)
+        if (message.isBlank()) {
+            return ToolResult.Failure("보낼 문자 내용을 함께 알려주세요.")
+        }
+        val action = PendingContactAction(
+            type = PendingContactActionType.TEXT,
+            query = query,
+            message = message,
+        )
+        setPendingContactAction(action)
+        return ToolResult.Success("${query}에게 문자 보내기 전 사용자 확인을 기다리고 있습니다. 앱 화면에서 실행을 누르거나 '응, 보내'라고 말하면 실행됩니다.")
+    }
+
+    private fun setPendingContactAction(action: PendingContactAction) {
+        _uiState.value = _uiState.value.copy(
+            pendingContactAction = action,
+            aiTranscript = when (action.type) {
+                PendingContactActionType.CALL -> "${action.query}에게 전화할까요?"
+                PendingContactActionType.TEXT -> "${action.query}에게 아래 문자 내용을 보낼까요?\n${action.message.orEmpty()}"
+            },
+        )
+    }
+
+    fun confirmPendingContactAction() {
+        val action = _uiState.value.pendingContactAction ?: return
+        val result = when (action.type) {
+            PendingContactActionType.CALL -> contactActionManager.callContact(action.query)
+            PendingContactActionType.TEXT -> contactActionManager.textContact(
+                query = action.query,
+                message = action.message.orEmpty(),
+            )
+        }
+        _uiState.value = _uiState.value.copy(
+            pendingContactAction = null,
+            aiTranscript = when (result) {
+                is ToolResult.Success -> result.result
+                is ToolResult.Failure -> result.error
+            },
+            errorMessage = (result as? ToolResult.Failure)?.error,
+        )
+    }
+
+    fun cancelPendingContactAction() {
+        _uiState.value = _uiState.value.copy(
+            pendingContactAction = null,
+            aiTranscript = "전화/문자 실행을 취소했습니다.",
+        )
+    }
+
+    private fun isContactActionConfirm(text: String): Boolean {
+        val normalized = text.replace(" ", "")
+        return listOf("응", "확인", "그래", "좋아", "진행", "실행", "보내", "보내줘", "전화해", "걸어", "걸어줘")
+            .any { normalized.contains(it) }
+    }
+
+    private fun isContactActionCancel(text: String): Boolean {
+        val normalized = text.replace(" ", "")
+        return listOf("취소", "아니", "하지마", "멈춰", "보내지마", "전화하지마", "걸지마")
+            .any { normalized.contains(it) }
     }
 
     private suspend fun createContact(call: GeminiFunctionCall): ToolResult {

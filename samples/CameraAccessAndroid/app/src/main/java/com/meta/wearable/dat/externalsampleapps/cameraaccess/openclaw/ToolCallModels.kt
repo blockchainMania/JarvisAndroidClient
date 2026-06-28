@@ -80,14 +80,30 @@ sealed class ToolCallStatus {
     val displayText: String
         get() = when (this) {
             is Idle -> ""
-            is Executing -> "Running: $name..."
-            is Completed -> "Done: $name"
-            is Failed -> "Failed: $name - $error"
+            is Executing -> "${name.userFacingToolLabel()} 중"
+            is Completed -> "${name.userFacingToolLabel()} 완료"
+            is Failed -> "${name.userFacingToolLabel()} 실패: $error"
             is Cancelled -> "요청이 중단됐어요. 다시 말씀해주세요."
         }
 
     val isActive: Boolean
         get() = this is Executing
+}
+
+private fun String.userFacingToolLabel(): String = when (this) {
+    "capture_current_view" -> "현재 시야 캡처"
+    "save_life_memory", "save_memory" -> "기억 저장"
+    "universal_search", "search_memory" -> "기억 검색"
+    "search_contacts" -> "연락처 후보 검색"
+    "call_contact" -> "전화 연결"
+    "text_contact" -> "문자 전송"
+    "create_contact" -> "연락처 등록"
+    "create_calendar_event" -> "일정 등록"
+    "save_meeting" -> "회의 저장"
+    "save_person" -> "사람 저장"
+    "save_need" -> "니즈 저장"
+    "get_proposal_context" -> "제안 정보 정리"
+    else -> "요청 처리"
 }
 
 // ─── Connection State (Jarvis API, name kept for compatibility) ──
@@ -107,6 +123,7 @@ sealed class OpenClawConnectionState {
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray = JSONArray()
         .put(captureCurrentView())
+        .put(searchContacts())
         .put(callContact())
         .put(textContact())
         .put(createContact())
@@ -214,15 +231,24 @@ object ToolDeclarations {
 
     private fun callContact() = decl(
         name = "call_contact",
-        description = "사용자의 Android 전화번호부에서 연락처를 찾아 즉시 전화를 겁니다. 예: '김민수한테 전화해줘', '박부장님 연결해줘'. 여러 명이면 다시 확인하세요.",
+        description = "사용자의 Android 전화번호부에서 연락처를 찾아 즉시 전화를 겁니다. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 대상자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
         properties = JSONObject()
             .put("query", strProp("연락처 이름 또는 전화번호 일부")),
         required = listOf("query"),
     )
 
+    private fun searchContacts() = decl(
+        name = "search_contacts",
+        description = "사용자의 Android 전화번호부에서 이름/별칭/전화번호 일부로 연락처 후보를 찾습니다. 자비스 DB 후보가 없거나 사용자가 '내 연락처에서 찾아줘'라고 하면 이 도구를 호출해 후보를 번호로 제시하세요. 이 도구는 전화/문자를 실행하지 않고 후보만 반환합니다.",
+        properties = JSONObject()
+            .put("query", strProp("연락처 이름, 별칭, 또는 전화번호 일부"))
+            .put("top_k", intProp("반환할 최대 후보 수. 기본 5")),
+        required = listOf("query"),
+    )
+
     private fun textContact() = decl(
         name = "text_contact",
-        description = "사용자의 Android 전화번호부에서 연락처를 찾아 SMS 문자를 즉시 전송합니다. 예: '김민수에게 문자 보내줘, 10분 늦어요'. 여러 명이면 다시 확인하세요.",
+        description = "사용자의 Android 전화번호부에서 연락처를 찾아 SMS 문자를 즉시 전송합니다. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 수신자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
         properties = JSONObject()
             .put("query", strProp("연락처 이름 또는 전화번호 일부"))
             .put("message", strProp("보낼 문자 초안")),
@@ -303,7 +329,7 @@ object ToolDeclarations {
 
     private fun saveLifeMemory() = decl(
         name = "save_life_memory",
-        description = "일상 장면을 이미지와 함께 저장. 저장 전에는 반드시 capture_current_view로 현재 장면을 확인하고, 보이는 내용을 설명한 뒤 '이 내용으로 저장하면 될까요?'라고 사용자 확인을 받으세요. 사용자가 승인하면 현재 장면에 대한 AI 해석과 사용자 메모를 함께 저장하세요. 이미지는 앱이 최신 카메라 프레임을 자동 첨부합니다.",
+        description = "일상 장면을 이미지와 함께 저장. 반드시 사용자가 저장을 승인한 뒤에만 호출하세요. 저장 요청을 받으면 먼저 capture_current_view로 현재 장면을 확인하고, 보이는 내용을 설명한 뒤 '이 내용을 ...로 저장하면 될까요?'라고 확인해야 합니다. 사용자가 '응', '저장해', '맞아'처럼 승인한 경우에만 현재 장면에 대한 AI 해석과 사용자 메모를 함께 저장하세요. 이미지는 앱이 최신 카메라 프레임을 자동 첨부합니다.",
         properties = JSONObject()
             .put("captured_at", strProp("관측 시각 ISO 8601 UTC"))
             .put("user_note", strProp("사용자가 저장하고 싶다고 말한 핵심 정보"))
@@ -330,7 +356,7 @@ object ToolDeclarations {
 
     private fun universalSearch() = decl(
         name = "universal_search",
-        description = "저장된 사람, 물건, 명함, 문서, 장소, 미팅, 니즈 등 모든 과거 정보를 하나의 기억 검색으로 찾습니다. memories에서 의미/정확 검색 후 연결된 people, meeting, entities, needs를 함께 반환합니다. 모든 과거 정보 질문에는 이 도구를 우선 사용하세요.",
+        description = "저장된 사람, 물건, 명함, 문서, 장소, 미팅, 니즈 등 모든 과거 정보를 하나의 기억 검색으로 찾습니다. memories에서 의미/정확 검색 후 연결된 people, person_candidates, meeting, entities, needs를 함께 반환합니다. 전화/문자 대상 찾기처럼 STT가 이름을 틀릴 수 있는 상황에서는 person_candidates를 score 높은 순서로 사용자에게 추천하세요. 모든 과거 정보 질문에는 이 도구를 우선 사용하세요.",
         properties = JSONObject()
             .put("query", strProp("사용자의 자연어 검색 질문 전체"))
             .put("top_k", intProp("반환할 기억 개수. 기본 5"))

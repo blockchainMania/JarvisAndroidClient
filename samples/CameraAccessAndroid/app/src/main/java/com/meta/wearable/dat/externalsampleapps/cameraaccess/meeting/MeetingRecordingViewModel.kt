@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 data class MeetingRecordingUiState(
     val isRecording: Boolean = false,
     val isProcessing: Boolean = false,
+    val recordingStartedAtMs: Long? = null,
     val errorMessage: String? = null,
     val result: MeetingRecordingResult? = null,
 )
@@ -55,7 +56,10 @@ class MeetingRecordingViewModel(application: Application) : AndroidViewModel(app
             recorder = mediaRecorder
             recordingFile = file
             startedAt = ZonedDateTime.now(ZoneId.of("Asia/Seoul"))
-            _uiState.value = MeetingRecordingUiState(isRecording = true)
+            _uiState.value = MeetingRecordingUiState(
+                isRecording = true,
+                recordingStartedAtMs = System.currentTimeMillis(),
+            )
             Log.d(TAG, "Meeting recording started: ${file.absolutePath}")
         } catch (e: Exception) {
             file.delete()

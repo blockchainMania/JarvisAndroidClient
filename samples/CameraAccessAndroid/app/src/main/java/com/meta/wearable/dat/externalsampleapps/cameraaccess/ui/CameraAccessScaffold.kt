@@ -89,14 +89,6 @@ fun CameraAccessScaffold(
 
     Box(modifier = Modifier.fillMaxSize()) {
       when {
-        uiState.isMemoryVisible ->
-            MemoryScreen(
-                onBack = { viewModel.hideMemory() },
-            )
-        uiState.isSettingsVisible ->
-            SettingsScreen(
-                onBack = { viewModel.hideSettings() },
-            )
         uiState.isStreaming ->
             StreamScreen(
                 wearablesViewModel = viewModel,
@@ -111,6 +103,22 @@ fun CameraAccessScaffold(
             HomeScreen(
                 viewModel = viewModel,
             )
+      }
+
+      if (uiState.isMemoryVisible) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+          MemoryScreen(
+              onBack = { viewModel.hideMemory() },
+          )
+        }
+      }
+
+      if (uiState.isSettingsVisible) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+          SettingsScreen(
+              onBack = { viewModel.hideSettings() },
+          )
+        }
       }
 
       SnackbarHost(
