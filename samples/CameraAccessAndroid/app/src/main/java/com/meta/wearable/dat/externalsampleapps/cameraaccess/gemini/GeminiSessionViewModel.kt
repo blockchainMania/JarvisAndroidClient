@@ -99,6 +99,10 @@ class GeminiSessionViewModel : ViewModel() {
         // save-intent utterance before it's considered stale (the camera view may have changed).
         private const val VISUAL_READ_CACHE_TTL_MS = 90_000L
 
+        // How long a terminal tool-call status ("저장 완료" etc.) stays on screen before the
+        // banner auto-hides.
+        private const val TOOL_STATUS_AUTO_DISMISS_MS = 3_500L
+
         private const val ROOT_AGENT_SYSTEM_INSTRUCTION = """당신은 Jarvis 개인 비서의 판단 담당(루트 에이전트)입니다. 사용자 발화(음성 인식된 텍스트)를 보고 어떤 도구를 호출할지, 또는 도구 없이 바로 답할지 결정하세요. 당신의 텍스트 답변은 다른 컴포넌트가 그대로 소리 내어 읽으므로, 자연스러운 한국어 구어체로 짧게 쓰세요.
 
 [핵심 원칙]
@@ -134,6 +138,13 @@ class GeminiSessionViewModel : ViewModel() {
     private var reconnectAttempts: Int = 0
     @Volatile
     private var inputAudioSuspended: Boolean = false
+    // Guards the window between "STT recognized an utterance" and "its answer was handed to
+    // Live for TTS" -- isModelSpeaking alone doesn't cover this, so a second utterance spoken
+    // while the first is still awaiting its Flash/root-agent network round trip could start a
+    // fully concurrent sendTextOrVisionAnswer/runRootAgent call. Whichever call's network
+    // response happened to land last would "win" the TTS output regardless of question order,
+    // which is what a one-turn-behind-looking answer actually was.
+    private var isProcessingUtterance: Boolean = false
     private var inFlightToolCalls: Int = 0
     private var wakeWordSessionActive: Boolean = false
     private var pendingInitialText: String? = null
@@ -265,12 +276,33 @@ class GeminiSessionViewModel : ViewModel() {
 
             // Observe service state
             stateObservationJob = viewModelScope.launch {
+                // openClawBridge.lastToolCallStatus only ever moves Executing -> Completed/Failed
+                // and stays there -- nothing resets it back to Idle, so a "저장 완료" banner would
+                // sit on screen forever. Track how long the current terminal status has been
+                // showing and swap it for Idle (hides the banner) once it's been up long enough.
+                var lastSeenStatus: ToolCallStatus = ToolCallStatus.Idle
+                var lastSeenStatusAt = 0L
                 while (isActive) {
                     delay(100)
+                    val currentStatus = openClawBridge.lastToolCallStatus.value
+                    if (currentStatus != lastSeenStatus) {
+                        lastSeenStatus = currentStatus
+                        lastSeenStatusAt = System.currentTimeMillis()
+                    }
+                    val isTerminal = currentStatus is ToolCallStatus.Completed ||
+                        currentStatus is ToolCallStatus.Failed ||
+                        currentStatus is ToolCallStatus.Cancelled
+                    val displayStatus = if (
+                        isTerminal && System.currentTimeMillis() - lastSeenStatusAt >= TOOL_STATUS_AUTO_DISMISS_MS
+                    ) {
+                        ToolCallStatus.Idle
+                    } else {
+                        currentStatus
+                    }
                     _uiState.value = _uiState.value.copy(
                         connectionState = geminiService.connectionState.value,
                         isModelSpeaking = geminiService.isModelSpeaking.value,
-                        toolCallStatus = openClawBridge.lastToolCallStatus.value,
+                        toolCallStatus = displayStatus,
                         openClawConnectionState = openClawBridge.connectionState.value,
                     )
                 }
@@ -365,6 +397,7 @@ class GeminiSessionViewModel : ViewModel() {
         usingFallbackAndroidStt = false
         pendingToolConfirmation = null
         cachedVisualRead = null
+        isProcessingUtterance = false
         _uiState.value = GeminiUiState()
     }
 
@@ -446,7 +479,16 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         if (_uiState.value.connectionState == GeminiConnectionState.Ready && !geminiService.isModelSpeaking.value) {
-            sendTextOrVisionAnswer(text)
+            if (isProcessingUtterance) {
+                Log.d(TAG, "Dropping utterance, still awaiting the previous one's answer: $text")
+                return
+            }
+            isProcessingUtterance = true
+            try {
+                sendTextOrVisionAnswer(text)
+            } finally {
+                isProcessingUtterance = false
+            }
         }
     }
 
@@ -526,11 +568,11 @@ class GeminiSessionViewModel : ViewModel() {
         val hasExplicitSaveIntent = SAVE_INTENT_KEYWORDS.any { text.contains(it) }
         val wantsFreshCapture = RECAPTURE_KEYWORDS.any { text.contains(it) }
 
-        val cached = cachedVisualRead
-        if (
-            hasExplicitSaveIntent && !wantsFreshCapture && cached != null &&
-            System.currentTimeMillis() - cached.capturedAtMs <= VISUAL_READ_CACHE_TTL_MS
-        ) {
+        val cachedSnapshot = cachedVisualRead
+        val cacheIsFresh = cachedSnapshot != null && !wantsFreshCapture &&
+            System.currentTimeMillis() - cachedSnapshot.capturedAtMs <= VISUAL_READ_CACHE_TTL_MS
+
+        if (hasExplicitSaveIntent && cacheIsFresh) {
             // Save directly instead of routing back through the root agent: feeding the cached
             // read back in as a replayed capture_current_view turn works (Gemini accepts it as
             // long as a user turn precedes the functionCall turn), but in testing the model kept
@@ -538,12 +580,38 @@ class GeminiSessionViewModel : ViewModel() {
             // save_life_memory, even when explicitly told not to -- so there's nothing to skip
             // the confirm gate FOR. Since the read is already on hand and the user has already
             // asked to save it, there's no judgment call left to make here.
-            Log.d(TAG, "Explicit save intent + fresh cached read (${System.currentTimeMillis() - cached.capturedAtMs}ms old) -- saving directly: $text")
-            saveVisualReadDirectly(userNote = text, aiInterpretation = cached.answer, businessCard = cached.businessCard)
+            Log.d(TAG, "Explicit save intent + fresh cached read (${System.currentTimeMillis() - cachedSnapshot.capturedAtMs}ms old) -- saving directly: $text")
+            saveVisualReadDirectly(userNote = text, aiInterpretation = cachedSnapshot.answer, businessCard = cachedSnapshot.businessCard)
             return
         }
 
         val contents = JSONArray()
+        if (cacheIsFresh) {
+            // Any other follow-up about the same subject ("출력해줘", "전화번호가 뭐야", "다시
+            // 말해줘"...) shouldn't force a brand new photo either -- replay the cached read as a
+            // capture_current_view turn so the model answers from it directly. Not cleared here
+            // (unlike the save path above) since a read-only follow-up doesn't consume the read;
+            // more follow-ups within the same TTL window can keep reusing it.
+            Log.d(TAG, "Non-save follow-up + fresh cached read (${System.currentTimeMillis() - cachedSnapshot.capturedAtMs}ms old) -- replaying instead of recapturing: $text")
+            contents.put(JSONObject().apply {
+                put("role", "user")
+                put("parts", JSONArray().put(JSONObject().put("text", "현재 시야를 봐줘")))
+            })
+            contents.put(JSONObject().apply {
+                put("role", "model")
+                put("parts", JSONArray().put(JSONObject().put("functionCall", JSONObject().apply {
+                    put("name", "capture_current_view")
+                    put("args", JSONObject().put("reason", "이전에 읽은 내용 재사용"))
+                })))
+            })
+            contents.put(JSONObject().apply {
+                put("role", "user")
+                put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().apply {
+                    put("name", "capture_current_view")
+                    put("response", ToolResult.Success("[FINAL_ANSWER] ${cachedSnapshot.answer}").toJSON())
+                })))
+            })
+        }
         contents.put(JSONObject().apply {
             put("role", "user")
             put("parts", JSONArray().put(JSONObject().put("text", text)))
@@ -791,6 +859,7 @@ class GeminiSessionViewModel : ViewModel() {
             usingFallbackAndroidStt = false
             pendingToolConfirmation = null
             cachedVisualRead = null
+            isProcessingUtterance = false
             _uiState.value = GeminiUiState()
             delay(1_200L)
             startSession(wakeWordInitiated = resumeWakeWordMode)

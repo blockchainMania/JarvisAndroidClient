@@ -65,7 +65,14 @@ object GeminiRootAgentClient {
             put("tools", JSONArray().put(JSONObject().put("functionDeclarations", TOOLS)))
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.2)
-                put("maxOutputTokens", 1024)
+                // Verified via curl: with unbounded/default thinking, this exact combination
+                // (long system instruction + many tool declarations) reliably produced a
+                // completely empty response -- finishReason STOP, zero output tokens, not even
+                // truncation -- specifically for queries that should trigger universal_search
+                // (e.g. "OO 검색해줘", "OO한테 전화해줘"). Capping thinkingBudget eliminated it
+                // in every repro case. maxOutputTokens raised to leave headroom beyond the cap.
+                put("maxOutputTokens", 2048)
+                put("thinkingConfig", JSONObject().put("thinkingBudget", 1024))
             })
         }
         return call(body)
