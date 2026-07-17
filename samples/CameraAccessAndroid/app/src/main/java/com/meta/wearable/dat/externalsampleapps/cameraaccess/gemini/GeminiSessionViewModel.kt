@@ -134,6 +134,13 @@ class GeminiSessionViewModel : ViewModel() {
     private var reconnectAttempts: Int = 0
     @Volatile
     private var inputAudioSuspended: Boolean = false
+    // Guards the window between "STT recognized an utterance" and "its answer was handed to
+    // Live for TTS" -- isModelSpeaking alone doesn't cover this, so a second utterance spoken
+    // while the first is still awaiting its Flash/root-agent network round trip could start a
+    // fully concurrent sendTextOrVisionAnswer/runRootAgent call. Whichever call's network
+    // response happened to land last would "win" the TTS output regardless of question order,
+    // which is what a one-turn-behind-looking answer actually was.
+    private var isProcessingUtterance: Boolean = false
     private var inFlightToolCalls: Int = 0
     private var wakeWordSessionActive: Boolean = false
     private var pendingInitialText: String? = null
@@ -365,6 +372,7 @@ class GeminiSessionViewModel : ViewModel() {
         usingFallbackAndroidStt = false
         pendingToolConfirmation = null
         cachedVisualRead = null
+        isProcessingUtterance = false
         _uiState.value = GeminiUiState()
     }
 
@@ -446,7 +454,16 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         if (_uiState.value.connectionState == GeminiConnectionState.Ready && !geminiService.isModelSpeaking.value) {
-            sendTextOrVisionAnswer(text)
+            if (isProcessingUtterance) {
+                Log.d(TAG, "Dropping utterance, still awaiting the previous one's answer: $text")
+                return
+            }
+            isProcessingUtterance = true
+            try {
+                sendTextOrVisionAnswer(text)
+            } finally {
+                isProcessingUtterance = false
+            }
         }
     }
 
@@ -791,6 +808,7 @@ class GeminiSessionViewModel : ViewModel() {
             usingFallbackAndroidStt = false
             pendingToolConfirmation = null
             cachedVisualRead = null
+            isProcessingUtterance = false
             _uiState.value = GeminiUiState()
             delay(1_200L)
             startSession(wakeWordInitiated = resumeWakeWordMode)
