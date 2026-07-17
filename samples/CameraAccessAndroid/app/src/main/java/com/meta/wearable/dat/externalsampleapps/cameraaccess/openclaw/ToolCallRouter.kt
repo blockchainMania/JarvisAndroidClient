@@ -20,6 +20,18 @@ class ToolCallRouter(
         private const val TAG = "ToolCallRouter"
         private const val MAX_CONSECUTIVE_FAILURES = 3
 
+        // Tools executed purely on-device (contacts/calendar/camera), never sent to the
+        // Jarvis backend. Exposed here (not private) so the root agent dispatch path in
+        // GeminiSessionViewModel can use the same set instead of duplicating it.
+        val LOCAL_TOOL_NAMES = setOf(
+            "capture_current_view",
+            "search_contacts",
+            "call_contact",
+            "text_contact",
+            "create_contact",
+            "create_calendar_event",
+        )
+
         fun buildImmediateResponse(call: GeminiFunctionCall, result: ToolResult): JSONObject =
             buildToolResponse(call.id, call.name, result)
 
@@ -85,15 +97,6 @@ class ToolCallRouter(
 
         inFlightJobs[callId] = job
     }
-
-    private val LOCAL_TOOL_NAMES = setOf(
-        "capture_current_view",
-        "search_contacts",
-        "call_contact",
-        "text_contact",
-        "create_contact",
-        "create_calendar_event",
-    )
 
     fun cancelToolCalls(ids: List<String>): Int {
         var cancelledCount = 0
