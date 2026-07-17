@@ -69,6 +69,7 @@ data class CachedVisualRead(
     val answer: String,
     val capturedAtMs: Long,
     val frame: VisualMemoryFrameStore.VisualFrame,
+    val businessCard: GeminiFlashVisionClient.BusinessCard? = null,
 )
 
 class GeminiSessionViewModel : ViewModel() {
@@ -538,7 +539,7 @@ class GeminiSessionViewModel : ViewModel() {
             // the confirm gate FOR. Since the read is already on hand and the user has already
             // asked to save it, there's no judgment call left to make here.
             Log.d(TAG, "Explicit save intent + fresh cached read (${System.currentTimeMillis() - cached.capturedAtMs}ms old) -- saving directly: $text")
-            saveVisualReadDirectly(userNote = text, aiInterpretation = cached.answer)
+            saveVisualReadDirectly(userNote = text, aiInterpretation = cached.answer, businessCard = cached.businessCard)
             return
         }
 
@@ -583,6 +584,22 @@ class GeminiSessionViewModel : ViewModel() {
             }
 
             val result = dispatchRootAgentTool(call.name, call.args)
+
+            // Same reasoning as the pre-loop fast path above: if the utterance already asked to
+            // save and this step just read something (business card/document), don't hand the
+            // "should I save this?" decision back to the model -- testing showed it often just
+            // re-asks as plain text instead of ever calling save_life_memory. Save now instead.
+            if (call.name == "capture_current_view" && hasExplicitSaveIntent) {
+                val freshRead = cachedVisualRead
+                if (freshRead != null) {
+                    saveVisualReadDirectly(
+                        userNote = text,
+                        aiInterpretation = freshRead.answer,
+                        businessCard = freshRead.businessCard,
+                    )
+                    return
+                }
+            }
 
             contents.put(JSONObject().apply {
                 put("role", "model")
@@ -629,13 +646,35 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     /** Dispatches save_life_memory straight from a cached capture_current_view read -- see the
-     * cache-reuse branch in runRootAgent() for why this bypasses another root agent step. */
-    private suspend fun saveVisualReadDirectly(userNote: String, aiInterpretation: String) {
-        val args = mapOf(
+     * cache-reuse branch in runRootAgent() for why this bypasses another root agent step. When
+     * the read was a business card, builds the person entity ourselves from the structured
+     * fields Flash returned instead of leaving it to the model to re-derive from prose --
+     * that's exactly where fields other than name/company were getting lost. */
+    private suspend fun saveVisualReadDirectly(
+        userNote: String,
+        aiInterpretation: String,
+        businessCard: GeminiFlashVisionClient.BusinessCard?,
+    ) {
+        val args = mutableMapOf<String, Any?>(
             "captured_at" to Instant.now().toString(),
             "user_note" to userNote,
             "ai_interpretation" to aiInterpretation,
         )
+        if (businessCard != null) {
+            args["labels"] = JSONArray().put("business_card").put("document")
+            val entityMetadata = JSONObject().apply {
+                put("org", businessCard.company)
+                businessCard.role?.let { put("role", it) }
+                businessCard.phone?.let { put("phone", it) }
+                businessCard.email?.let { put("email", it) }
+                businessCard.address?.let { put("address", it) }
+            }
+            args["entities"] = JSONArray().put(JSONObject().apply {
+                put("type", "person")
+                put("label", businessCard.name)
+                put("metadata", entityMetadata)
+            })
+        }
         val result = dispatchRootAgentTool("save_life_memory", args)
         val spoken = try {
             GeminiRootAgentClient.synthesizeAnswer("save_life_memory", result.toJSON().toString())
@@ -942,8 +981,24 @@ class GeminiSessionViewModel : ViewModel() {
             answer = flashResult.answer,
             capturedAtMs = System.currentTimeMillis(),
             frame = visualFrame,
+            businessCard = flashResult.businessCard,
         )
-        return ToolResult.Success("[FINAL_ANSWER] ${flashResult.answer}")
+        // Hand the root agent the structured fields too, not just prose -- if it ends up being
+        // the one to call save_life_memory (see ROOT_AGENT_SYSTEM_INSTRUCTION), it should copy
+        // these into the entity metadata verbatim instead of re-deriving them from a sentence.
+        val structuredHint = flashResult.businessCard?.let { card ->
+            val json = JSONObject().apply {
+                put("type", "business_card")
+                put("name", card.name)
+                put("company", card.company)
+                card.role?.let { put("role", it) }
+                card.phone?.let { put("phone", it) }
+                card.email?.let { put("email", it) }
+                card.address?.let { put("address", it) }
+            }
+            "\n[구조화 데이터] $json"
+        }.orEmpty()
+        return ToolResult.Success("[FINAL_ANSWER] ${flashResult.answer}$structuredHint")
     }
 
     fun clearError() {

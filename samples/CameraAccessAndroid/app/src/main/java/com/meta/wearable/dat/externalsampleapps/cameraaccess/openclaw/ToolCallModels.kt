@@ -165,7 +165,9 @@ object ToolDeclarations {
                 .put("aliases", arrStrProp("별칭 목록 (선택)"))
                 .put("metadata", JSONObject()
                     .put("type", "object")
-                    .put("description", "명함의 전화번호/email/직책 등 추가 JSON 정보"))
+                    .put("description", "명함이면 회사명은 org, 직책은 role, 전화번호는 phone, 이메일은 email, " +
+                        "회사주소는 address 키로 넣으세요(정확히 이 키 이름을 쓰세요). capture_current_view 결과에 " +
+                        "[구조화 데이터]가 있으면 그 필드를 그대로 옮기세요."))
             )
             put("required", JSONArray(listOf("type", "label")))
         })
