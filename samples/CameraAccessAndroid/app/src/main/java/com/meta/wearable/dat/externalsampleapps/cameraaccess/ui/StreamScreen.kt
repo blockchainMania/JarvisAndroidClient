@@ -15,6 +15,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -123,7 +124,7 @@ fun StreamScreen(
                     geminiViewModel.stopSession()
                 }
                 meetingRecordingViewModel.startRecording()
-                Toast.makeText(context, "회의 시작하겠습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "회의를 시작합니다. 음성만 녹음되며 화면은 저장되지 않습니다.", Toast.LENGTH_SHORT).show()
             }
             MeetingVoiceCommand.STOP -> {
                 if (!meetingRecordingUiState.isRecording) {
@@ -327,7 +328,7 @@ fun StreamScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFF4F7FB)),
+            .background(AppColor.Background),
     ) {
         Column(
             modifier = Modifier
@@ -351,15 +352,16 @@ fun StreamScreen(
                     Icon(
                         imageVector = Icons.Default.CollectionsBookmark,
                         contentDescription = "Records",
-                        tint = Color(0xFF1B263B),
+                        tint = AppColor.TextPrimary,
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            val isMeetingModeActive = meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing
             val capturedPhoto = streamUiState.capturedPhoto
-            if (meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing) {
+            if (isMeetingModeActive) {
                 MeetingModePanel(
                     isRecording = meetingRecordingUiState.isRecording,
                     isProcessing = meetingRecordingUiState.isProcessing,
@@ -370,18 +372,36 @@ fun StreamScreen(
                     },
                     modifier = Modifier.weight(1f),
                 )
-            } else if (capturedPhoto != null) {
-                PreviewPanel(
-                    title = "최근 캡처",
-                    bitmap = capturedPhoto,
-                    modifier = Modifier.weight(1f),
-                )
             } else {
-                EmptyVisualPanel(
-                    isLoading = streamUiState.streamSessionState == StreamSessionState.STARTING,
-                    modeLabel = if (streamUiState.streamingMode == StreamingMode.PHONE) "Phone Camera" else "Glasses Camera",
-                    modifier = Modifier.weight(1f),
-                )
+                // Fixed-ratio visual panel: its height never changes when Gemini turns on,
+                // so the chat panel below gets its own space instead of squeezing this one.
+                if (capturedPhoto != null) {
+                    PreviewPanel(
+                        title = "최근 캡처",
+                        bitmap = capturedPhoto,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(4f / 3f),
+                    )
+                } else {
+                    EmptyVisualPanel(
+                        isLoading = streamUiState.streamSessionState == StreamSessionState.STARTING,
+                        modeLabel = if (streamUiState.streamingMode == StreamingMode.PHONE) "Phone Camera" else "Glasses Camera",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(4f / 3f),
+                    )
+                }
+
+                if (geminiUiState.isGeminiActive) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    GeminiChatPanel(
+                        uiState = geminiUiState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -408,6 +428,7 @@ fun StreamScreen(
                             geminiViewModel.stopSession()
                         }
                         meetingRecordingViewModel.startRecording()
+                        Toast.makeText(context, "회의를 시작합니다. 음성만 녹음되며 화면은 저장되지 않습니다.", Toast.LENGTH_SHORT).show()
                     }
                 },
                 isRecording = meetingRecordingUiState.isRecording,
@@ -443,11 +464,6 @@ fun StreamScreen(
                     .statusBarsPadding()
                     .padding(top = 88.dp),
             ) {
-                // Gemini overlay
-                if (geminiUiState.isGeminiActive) {
-                    GeminiOverlay(uiState = geminiUiState)
-                }
-
                 geminiUiState.pendingContactAction?.let { action ->
                     Spacer(modifier = Modifier.height(8.dp))
                     ContactActionConfirmCard(
@@ -489,24 +505,24 @@ private fun StatusPanel(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier,
-        color = Color.White,
+        modifier = modifier.border(1.dp, AppColor.Border, RoundedCornerShape(16.dp)),
+        color = AppColor.Surface,
         shape = RoundedCornerShape(16.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
             Text(
                 text = title,
-                color = Color(0xFF10233F),
+                color = AppColor.TextPrimary,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = body,
-                color = Color(0xFF52627A),
+                color = AppColor.TextSecondary,
             )
             Spacer(modifier = Modifier.height(10.dp))
             Row(
@@ -537,7 +553,7 @@ private fun StatusChip(
 ) {
     Surface(
         modifier = modifier,
-        color = Color(0xFFF1F5FA),
+        color = AppColor.SurfaceMuted,
         shape = RoundedCornerShape(999.dp),
     ) {
         Row(
@@ -554,7 +570,7 @@ private fun StatusChip(
             Spacer(modifier = Modifier.size(5.dp))
             Text(
                 text = info.label,
-                color = Color(0xFF334155),
+                color = AppColor.TextPrimary,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 fontSize = 10.sp,
@@ -570,8 +586,10 @@ private fun EmptyVisualPanel(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color(0xFFEAF1FB),
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, AppColor.Border, RoundedCornerShape(20.dp)),
+        color = AppColor.Surface,
         shape = RoundedCornerShape(20.dp),
     ) {
         Column(
@@ -587,15 +605,15 @@ private fun EmptyVisualPanel(
             }
             Text(
                 text = "실시간 영상을 계속 표시하지 않고, 시각 질문 시 최신 캡처만 보여줍니다.",
-                color = Color(0xFF10233F),
+                color = AppColor.TextPrimary,
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = Color(0xFFD4DEEC))
+            HorizontalDivider(color = AppColor.Border)
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = modeLabel,
-                color = Color(0xFF6B7A90),
+                color = AppColor.TextSecondary,
                 fontWeight = FontWeight.Medium,
             )
             Spacer(modifier = Modifier.weight(1f))
@@ -612,37 +630,39 @@ private fun ContactActionConfirmCard(
 ) {
     val isCall = action.type == PendingContactActionType.CALL
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color(0xFFF8FAFC),
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, AppColor.Border, RoundedCornerShape(18.dp)),
+        color = AppColor.Surface,
         shape = RoundedCornerShape(18.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
         ) {
             Text(
                 text = if (isCall) "전화 실행 전 확인" else "문자 전송 전 확인",
-                color = Color(0xFF10233F),
+                color = AppColor.TextPrimary,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "대상: ${action.query}",
-                color = Color(0xFF334155),
+                color = AppColor.TextPrimary,
                 fontWeight = FontWeight.Medium,
             )
             if (!isCall) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
-                    color = Color.White,
+                    color = AppColor.SurfaceMuted,
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Text(
                         text = action.message.orEmpty(),
                         modifier = Modifier.padding(12.dp),
-                        color = Color(0xFF475569),
+                        color = AppColor.TextSecondary,
                     )
                 }
             }
@@ -687,11 +707,13 @@ private fun MeetingModePanel(
     val elapsedText = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = if (isProcessing) Color(0xFFFFF7E8) else Color(0xFFFFEEF0),
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, AppColor.Border, RoundedCornerShape(20.dp)),
+        color = AppColor.Surface,
         shape = RoundedCornerShape(20.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier
@@ -709,7 +731,7 @@ private fun MeetingModePanel(
             Spacer(modifier = Modifier.height(18.dp))
             Text(
                 text = if (isProcessing) "회의록 정리 중" else "회의 녹음 중",
-                color = Color(0xFF10233F),
+                color = AppColor.TextPrimary,
                 fontWeight = FontWeight.Bold,
                 fontSize = 24.sp,
                 textAlign = TextAlign.Center,
@@ -717,24 +739,24 @@ private fun MeetingModePanel(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = if (isProcessing) "녹음 내용을 분석하고 있습니다." else elapsedText,
-                color = Color(0xFF52627A),
+                color = AppColor.TextSecondary,
                 fontWeight = if (isRecording) FontWeight.Bold else FontWeight.Medium,
                 fontSize = if (isRecording) 36.sp else 16.sp,
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(18.dp))
             Surface(
-                color = Color.White.copy(alpha = 0.72f),
+                color = AppColor.SurfaceMuted,
                 shape = RoundedCornerShape(14.dp),
             ) {
                 Text(
                     text = if (isProcessing) {
                         "잠시 후 회의 목록에서 요약, Action Item, 원문을 확인할 수 있습니다."
                     } else {
-                        "회의 중 발화는 AI 명령으로 처리하지 않습니다.\n끝낼 때는 \"회의 녹음 종료\"라고 말하거나 아래 버튼을 누르세요."
+                        "음성만 녹음되며 화면은 저장되지 않습니다.\n회의 중 발화는 AI 명령으로 처리하지 않습니다.\n끝낼 때는 아래 버튼을 눌러주세요. (녹음 중에는 음성 명령 인식이 불안정할 수 있습니다)"
                     },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                    color = Color(0xFF334155),
+                    color = AppColor.TextPrimary,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -758,11 +780,13 @@ private fun PreviewPanel(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color.White,
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, AppColor.Border, RoundedCornerShape(20.dp)),
+        color = AppColor.Surface,
         shape = RoundedCornerShape(20.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier
@@ -771,7 +795,7 @@ private fun PreviewPanel(
         ) {
             Text(
                 text = title,
-                color = Color(0xFF10233F),
+                color = AppColor.TextPrimary,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -782,7 +806,7 @@ private fun PreviewPanel(
                     .fillMaxWidth()
                     .weight(1f)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFEAF1FB))
+                    .background(AppColor.SurfaceMuted)
                     .aspectRatio(3f / 4f),
                 contentScale = ContentScale.Crop,
             )
