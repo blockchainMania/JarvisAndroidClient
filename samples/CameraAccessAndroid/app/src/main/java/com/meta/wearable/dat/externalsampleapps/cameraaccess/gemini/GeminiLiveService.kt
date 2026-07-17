@@ -5,7 +5,6 @@ import android.util.Base64
 import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCall
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCallCancellation
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolDeclarations
 import java.io.ByteArrayOutputStream
 import java.util.Timer
 import java.util.TimerTask
@@ -63,7 +62,11 @@ class GeminiLiveService {
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
-        .pingInterval(10, TimeUnit.SECONDS)
+        // Bumped from 10s: a long continuous TTS burst (e.g. reading back a full business
+        // card) tripped "sent ping but didn't receive pong" mid-sentence in testing, killing
+        // the connection and cutting the audio off. A longer interval gives a busy connection
+        // more slack before OkHttp decides it's dead.
+        .pingInterval(25, TimeUnit.SECONDS)
         .build()
 
     fun connect(
@@ -214,6 +217,42 @@ class GeminiLiveService {
         }
     }
 
+    /**
+     * Sends an image and text as parts of the SAME user turn, instead of pushing the
+     * image over realtimeInput and the text over clientContent as two separate
+     * messages. realtimeInput is a background stream with no ordering guarantee
+     * relative to clientContent turnComplete -- the model can start answering a
+     * turnComplete message before a realtimeInput image has actually been folded
+     * into its context, which is what caused vision questions to hallucinate even
+     * right after attaching a "fresh" frame. Bundling both into one turn removes
+     * that race entirely.
+     */
+    fun sendTextMessageWithImage(text: String, imageBase64: String) {
+        if (_connectionState.value != GeminiConnectionState.Ready) return
+        sendExecutor.execute {
+            val json = JSONObject().apply {
+                put("clientContent", JSONObject().apply {
+                    put("turns", JSONArray().put(JSONObject().apply {
+                        put("role", "user")
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("inlineData", JSONObject().apply {
+                                    put("mimeType", "image/jpeg")
+                                    put("data", imageBase64)
+                                })
+                            })
+                            put(JSONObject().apply {
+                                put("text", text)
+                            })
+                        })
+                    }))
+                    put("turnComplete", true)
+                })
+            }
+            webSocket?.send(json.toString())
+        }
+    }
+
     // Private
 
     private fun resolveConnect(success: Boolean) {
@@ -247,9 +286,10 @@ class GeminiLiveService {
                         put("text", systemInstruction)
                     }))
                 })
-                put("tools", JSONArray().put(JSONObject().apply {
-                    put("functionDeclarations", ToolDeclarations.allDeclarationsJSON())
-                }))
+                // No "tools" here on purpose -- Live never decides which function to call
+                // anymore (GeminiRootAgentClient does, via a stateless Flash request). Live
+                // is pure TTS: it only speaks the text it's handed. See
+                // JARVIS_ROOT_AGENT_ARCHITECTURE_KO.md Phase 2.
                 put("realtimeInputConfig", JSONObject().apply {
                     put("automaticActivityDetection", JSONObject().apply {
                         put("disabled", false)

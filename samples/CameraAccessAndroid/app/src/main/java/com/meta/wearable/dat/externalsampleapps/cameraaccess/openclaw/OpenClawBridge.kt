@@ -93,11 +93,34 @@ class OpenClawBridge {
             _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
             val result: ToolResult = try {
                 when (toolName) {
-                    "save_person" -> post(
-                        "/people",
-                        pick(args, "name", "aliases", "org", "role",
+                    "save_person" -> {
+                        val body = pick(args, "name", "aliases", "org", "role",
                                    "first_met_at", "last_met_at", "notes_summary")
-                    )
+                        val attachPhoto = args["attach_current_photo"] == true ||
+                            args["attach_current_photo"]?.toString() == "true"
+                        if (attachPhoto) {
+                            val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
+                            if (visualFrame != null) {
+                                body.put("image_base64", visualFrame.base64)
+                                body.put("image_mime_type", "image/jpeg")
+                            }
+                            // No fresh frame available -- save without a photo rather than
+                            // failing the whole request; name/org/role are still useful alone.
+                        }
+                        post("/people", body)
+                    }
+                    "identify_person" -> {
+                        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
+                            ?: return@withContext ToolResult.Failure(
+                                "No fresh camera image is available. Ask the user to hold still and retry."
+                            )
+                        post(
+                            "/people/identify",
+                            JSONObject()
+                                .put("image_base64", visualFrame.base64)
+                                .put("image_mime_type", "image/jpeg")
+                        )
+                    }
                     "search_people" -> post(
                         "/people/search",
                         pick(args, "query", "top_k")

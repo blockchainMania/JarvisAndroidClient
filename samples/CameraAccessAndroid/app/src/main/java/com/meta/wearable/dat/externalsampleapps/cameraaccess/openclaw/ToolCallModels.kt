@@ -129,6 +129,7 @@ object ToolDeclarations {
         .put(createContact())
         .put(createCalendarEvent())
         .put(savePerson())
+        .put(identifyPerson())
         .put(saveMeeting())
         .put(saveMemory())
         .put(saveLifeMemory())
@@ -219,14 +220,25 @@ object ToolDeclarations {
 
     private fun savePerson() = decl(
         name = "save_person",
-        description = "사용자가 새 사람을 메모리에 저장하라고 할 때. 예: '이 사람 저장해줘', '방금 만난 박부장 등록'.",
+        description = "사용자가 새 사람을 메모리에 저장하라고 할 때. 예: '이 사람 저장해줘', '방금 만난 박부장 등록'. 사용자가 지금 보고 있는 사람을 사진과 함께 등록하려는 것이면(예: '이 사람 사진 찍어서 저장해줘', identify_person이 못 찾은 사람을 새로 등록할 때) attach_current_photo를 true로 하세요 -- 앱이 최신 카메라 프레임을 얼굴 인식용으로 함께 저장해서, 나중에 identify_person으로 이 사람을 다시 알아볼 수 있게 됩니다.",
         properties = JSONObject()
             .put("name", strProp("사람 이름 (한국어/영어)"))
             .put("aliases", arrStrProp("별칭/닉네임 목록 (선택)"))
             .put("org", strProp("소속 회사/조직 (선택)"))
             .put("role", strProp("직책/역할 (선택)"))
-            .put("notes_summary", strProp("간단한 요약/메모 (선택)")),
+            .put("notes_summary", strProp("간단한 요약/메모 (선택)"))
+            .put("attach_current_photo", JSONObject()
+                .put("type", "boolean")
+                .put("description", "true면 현재 카메라 프레임을 얼굴 인식용 참고사진으로 함께 저장 (선택, 기본 false)")),
         required = listOf("name"),
+    )
+
+    private fun identifyPerson() = decl(
+        name = "identify_person",
+        description = "지금 카메라에 보이는 사람이 누구인지 얼굴로 찾을 때 호출. 예: '이 사람 누구야?', '얘 이름 뭐였지?'. capture_current_view와 달리 이미지를 그대로 백엔드에 보내 저장된 사람들의 얼굴과 유사도를 비교합니다(텍스트 묘사로는 얼굴을 못 알아보므로). 결과에 일치하는 사람이 있으면 이름/소속을 답하고, 없으면 사용자에게 처음 뵙는 분 같다고 말하고 이름을 물어본 뒤 save_person(attach_current_photo=true)으로 등록을 제안하세요.",
+        properties = JSONObject()
+            .put("reason", strProp("얼굴 인식이 필요한 이유. 예: '앞에 있는 사람 확인'")),
+        required = listOf("reason"),
     )
 
     private fun callContact() = decl(

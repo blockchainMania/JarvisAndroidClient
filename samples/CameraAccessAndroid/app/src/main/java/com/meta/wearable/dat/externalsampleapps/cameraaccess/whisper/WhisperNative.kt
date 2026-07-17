@@ -5,10 +5,10 @@ import android.util.Log
 import java.io.File
 
 class WhisperContext private constructor(private var ptr: Long) {
-    suspend fun transcribe(data: FloatArray, language: String = "ko"): String {
+    suspend fun transcribe(data: FloatArray, language: String = "ko", prompt: String = ""): String {
         require(ptr != 0L)
         val threads = WhisperCpuConfig.preferredThreadCount
-        WhisperNative.fullTranscribe(ptr, threads, language, data)
+        WhisperNative.fullTranscribe(ptr, threads, language, prompt, data)
         val count = WhisperNative.getTextSegmentCount(ptr)
         return buildString {
             for (i in 0 until count) {
@@ -62,6 +62,7 @@ class WhisperNative {
             contextPtr: Long,
             numThreads: Int,
             language: String,
+            prompt: String,
             audioData: FloatArray,
         )
         external fun getTextSegmentCount(contextPtr: Long): Int

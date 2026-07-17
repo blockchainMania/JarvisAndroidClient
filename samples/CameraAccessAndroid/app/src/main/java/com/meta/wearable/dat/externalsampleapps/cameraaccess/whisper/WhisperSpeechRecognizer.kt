@@ -28,6 +28,9 @@ class WhisperSpeechRecognizer(
     private val onPartialText: (String) -> Unit,
     private val onFinalText: (String) -> Unit,
     private val onErrorText: (String) -> Unit,
+    // Supplies a short comma-separated hint (e.g. contact names) fed to Whisper as an
+    // initial_prompt so proper nouns are biased toward correct recognition.
+    private val sttHintProvider: () -> String = { "" },
 ) : SpeechInputController {
     companion object {
         private const val TAG = "WhisperSpeechRecognizer"
@@ -171,7 +174,8 @@ class WhisperSpeechRecognizer(
                 val utterance = readUtterance(audioRecord, chunk) ?: continue
                 val floats = pcm16ToFloatArray(utterance)
                 onPartialText("Whisper 인식 중...")
-                val text = whisperContext?.transcribe(floats, "ko").orEmpty()
+                val hint = runCatching { sttHintProvider() }.getOrDefault("")
+                val text = whisperContext?.transcribe(floats, "ko", hint).orEmpty()
                 if (text.isNotBlank()) {
                     withContext(Dispatchers.Main) {
                         onFinalText(text)

@@ -1,5 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,11 +49,13 @@ fun ControlsRow(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color.White,
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, AppColor.Border, RoundedCornerShape(18.dp)),
+        color = AppColor.Surface,
         shape = RoundedCornerShape(18.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier
@@ -85,8 +88,8 @@ fun ControlsRow(
                 },
                 onClick = onToggleAI,
                 enabled = aiEnabled,
-                containerColor = if (isAIActive) AppColor.Green else Color(0xFFEAF1FB),
-                contentColor = if (isAIActive) Color.White else Color(0xFF1B263B),
+                containerColor = if (isAIActive) AppColor.Green else AppColor.SurfaceMuted,
+                contentColor = if (isAIActive) Color.White else AppColor.TextPrimary,
                 modifier = Modifier.weight(1f),
             )
 
@@ -107,12 +110,12 @@ fun ControlsRow(
                 containerColor = when {
                     isRecordingProcessing -> Color(0xFFFFF3D9)
                     isRecording -> AppColor.Red
-                    else -> Color(0xFFEAF1FB)
+                    else -> AppColor.SurfaceMuted
                 },
                 contentColor = when {
                     isRecordingProcessing -> Color(0xFF7A5A00)
                     isRecording -> Color.White
-                    else -> Color(0xFF1B263B)
+                    else -> AppColor.TextPrimary
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -126,8 +129,8 @@ fun ControlsRow(
                     )
                 },
                 onClick = onToggleLive,
-                containerColor = if (isLiveActive) AppColor.DeepBlue else Color(0xFFEAF1FB),
-                contentColor = if (isLiveActive) Color.White else Color(0xFF1B263B),
+                containerColor = if (isLiveActive) AppColor.DeepBlue else AppColor.SurfaceMuted,
+                contentColor = if (isLiveActive) Color.White else AppColor.TextPrimary,
                 modifier = Modifier.weight(1f),
             )
 
@@ -141,8 +144,8 @@ fun ControlsRow(
                         )
                     },
                     onClick = onShareLive,
-                    containerColor = Color(0xFFE8F6EA),
-                    contentColor = Color(0xFF1E6B32),
+                    containerColor = AppColor.SurfaceMuted,
+                    contentColor = AppColor.TextPrimary,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -168,8 +171,8 @@ private fun ControlButton(
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor,
             contentColor = contentColor,
-            disabledContainerColor = Color(0xFFE5EAF1),
-            disabledContentColor = Color(0xFF8A97A8),
+            disabledContainerColor = AppColor.SurfaceMuted,
+            disabledContentColor = AppColor.TextSecondary,
         ),
     ) {
         Column(
