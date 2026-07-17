@@ -11,8 +11,6 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,7 +32,6 @@ data class WebRTCUiState(
     val isActive: Boolean = false,
     val connectionState: WebRTCConnectionState = WebRTCConnectionState.Disconnected,
     val roomCode: String = "",
-    val viewerUrl: String = "",
     val isMuted: Boolean = false,
     val errorMessage: String? = null,
     val remoteVideoTrack: VideoTrack? = null,
@@ -52,7 +49,6 @@ class WebRTCSessionViewModel(application: Application) : AndroidViewModel(applic
     private var webRTCClient: WebRTCClient? = null
     private var signalingClient: SignalingClient? = null
     private var savedRoomCode: String? = null
-    private var signalingTimeoutJob: Job? = null
 
     private val lifecycleObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
@@ -87,8 +83,6 @@ class WebRTCSessionViewModel(application: Application) : AndroidViewModel(applic
 
     fun stopSession() {
         removeForegroundObserver()
-        signalingTimeoutJob?.cancel()
-        signalingTimeoutJob = null
         webRTCClient?.close()
         webRTCClient = null
         signalingClient?.disconnect()
@@ -159,11 +153,9 @@ class WebRTCSessionViewModel(application: Application) : AndroidViewModel(applic
 
     private fun connectSignaling(rejoinCode: String?) {
         signalingClient?.disconnect()
-        signalingTimeoutJob?.cancel()
 
         val signaling = SignalingClient()
         signalingClient = signaling
-        val signalingUrl = WebRTCConfig.signalingServerURL
 
         signaling.onConnected = {
             viewModelScope.launch {
@@ -191,42 +183,28 @@ class WebRTCSessionViewModel(application: Application) : AndroidViewModel(applic
                 } else {
                     stopSession()
                     _uiState.value = _uiState.value.copy(
-                        errorMessage = reason ?: "Live signaling disconnected."
+                        errorMessage = "Signaling disconnected: ${reason ?: "Unknown"}"
                     )
                 }
             }
         }
 
-        signaling.connect(signalingUrl)
-        signalingTimeoutJob = viewModelScope.launch {
-            delay(10_000)
-            val state = _uiState.value.connectionState
-            if (_uiState.value.isActive && state is WebRTCConnectionState.Connecting) {
-                stopSession()
-                _uiState.value = _uiState.value.copy(
-                    errorMessage = "Live server timeout. Check phone Wi-Fi and Mac server: $signalingUrl"
-                )
-            }
-        }
+        signaling.connect(WebRTCConfig.signalingServerURL)
     }
 
     private fun handleSignalingMessage(message: SignalingMessage) {
         when (message) {
             is SignalingMessage.RoomCreated -> {
-                signalingTimeoutJob?.cancel()
                 _uiState.value = _uiState.value.copy(
                     roomCode = message.room,
-                    viewerUrl = WebRTCConfig.viewerUrl(message.room),
                     connectionState = WebRTCConnectionState.WaitingForPeer,
                 )
                 savedRoomCode = message.room
                 Log.d(TAG, "Room created: ${message.room}")
             }
             is SignalingMessage.RoomRejoined -> {
-                signalingTimeoutJob?.cancel()
                 _uiState.value = _uiState.value.copy(
                     roomCode = message.room,
-                    viewerUrl = WebRTCConfig.viewerUrl(message.room),
                     connectionState = WebRTCConnectionState.WaitingForPeer,
                 )
                 savedRoomCode = message.room

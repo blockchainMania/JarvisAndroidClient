@@ -7,33 +7,28 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConnectionState
@@ -41,93 +36,41 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiUiStat
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
 
-/**
- * Gemini conversation panel. Lives in the normal layout flow (below the visual
- * preview), not as a floating overlay, so its content never overlaps the
- * preview panel above it -- it just takes its own scrollable space.
- */
 @Composable
-fun GeminiChatPanel(
+fun GeminiOverlay(
     uiState: GeminiUiState,
     modifier: Modifier = Modifier,
 ) {
-    val scrollState = rememberScrollState()
-    LaunchedEffect(uiState.userTranscript, uiState.aiTranscript) {
-        scrollState.animateScrollTo(scrollState.maxValue)
-    }
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .border(1.dp, AppColor.Border, RoundedCornerShape(20.dp)),
-        color = AppColor.Surface,
-        shape = RoundedCornerShape(20.dp),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(14.dp),
-        ) {
-            GeminiStatusBar(
-                connectionState = uiState.connectionState,
-                openClawState = uiState.openClawConnectionState,
+        // Status bar
+        GeminiStatusBar(
+            connectionState = uiState.connectionState,
+            openClawState = uiState.openClawConnectionState,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Transcripts
+        if (uiState.userTranscript.isNotEmpty() || uiState.aiTranscript.isNotEmpty()) {
+            TranscriptView(
+                userTranscript = uiState.userTranscript,
+                aiTranscript = uiState.aiTranscript,
             )
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(scrollState)
-                    .padding(top = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (uiState.userTranscript.isNotEmpty()) {
-                    ChatBubble(text = uiState.userTranscript, isUser = true)
-                }
-                if (uiState.aiTranscript.isNotEmpty()) {
-                    ChatBubble(text = uiState.aiTranscript, isUser = false)
-                }
-            }
-
-            val toolStatus = uiState.toolCallStatus
-            if (toolStatus !is ToolCallStatus.Idle) {
-                Spacer(modifier = Modifier.height(6.dp))
-                ToolCallStatusView(status = toolStatus)
-            }
-
-            if (uiState.isModelSpeaking) {
-                Spacer(modifier = Modifier.height(6.dp))
-                SpeakingIndicator()
-            }
         }
-    }
-}
 
-@Composable
-private fun ChatBubble(
-    text: String,
-    isUser: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Surface(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .let { if (isUser) it else it.border(1.dp, AppColor.Border, RoundedCornerShape(16.dp)) },
-            color = if (isUser) AppColor.UserBubble else AppColor.AiBubble,
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            Text(
-                text = text,
-                color = if (isUser) AppColor.UserBubbleText else AppColor.AiBubbleText,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            )
+        // Tool call status
+        val toolStatus = uiState.toolCallStatus
+        if (toolStatus !is ToolCallStatus.Idle) {
+            Spacer(modifier = Modifier.height(4.dp))
+            ToolCallStatusView(status = toolStatus)
+        }
+
+        // Speaking indicator
+        if (uiState.isModelSpeaking) {
+            Spacer(modifier = Modifier.height(4.dp))
+            SpeakingIndicator()
         }
     }
 }
@@ -145,22 +88,22 @@ fun GeminiStatusBar(
         StatusPill(
             label = "AI",
             color = when (connectionState) {
-                is GeminiConnectionState.Ready -> AppColor.Green
+                is GeminiConnectionState.Ready -> Color(0xFF4CAF50)
                 is GeminiConnectionState.Connecting,
-                is GeminiConnectionState.SettingUp -> Color(0xFFE7A400)
-                is GeminiConnectionState.Error -> AppColor.Red
-                is GeminiConnectionState.Disconnected -> AppColor.TextSecondary
+                is GeminiConnectionState.SettingUp -> Color(0xFFFF9800)
+                is GeminiConnectionState.Error -> Color(0xFFF44336)
+                is GeminiConnectionState.Disconnected -> Color(0xFF9E9E9E)
             },
         )
 
         if (openClawState !is OpenClawConnectionState.NotConfigured) {
             StatusPill(
-                label = "Jarvis",
+                label = "OpenClaw",
                 color = when (openClawState) {
-                    is OpenClawConnectionState.Connected -> AppColor.Green
-                    is OpenClawConnectionState.Checking -> Color(0xFFE7A400)
-                    is OpenClawConnectionState.Unreachable -> AppColor.Red
-                    is OpenClawConnectionState.NotConfigured -> AppColor.TextSecondary
+                    is OpenClawConnectionState.Connected -> Color(0xFF4CAF50)
+                    is OpenClawConnectionState.Checking -> Color(0xFFFF9800)
+                    is OpenClawConnectionState.Unreachable -> Color(0xFFF44336)
+                    is OpenClawConnectionState.NotConfigured -> Color(0xFF9E9E9E)
                 },
             )
         }
@@ -175,7 +118,7 @@ fun StatusPill(
 ) {
     Row(
         modifier = modifier
-            .background(AppColor.SurfaceMuted, RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -188,9 +131,41 @@ fun StatusPill(
         )
         Text(
             text = label,
-            color = AppColor.TextPrimary,
+            color = Color.White,
             fontSize = 12.sp,
         )
+    }
+}
+
+@Composable
+fun TranscriptView(
+    userTranscript: String,
+    aiTranscript: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        if (userTranscript.isNotEmpty()) {
+            Text(
+                text = userTranscript,
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (aiTranscript.isNotEmpty()) {
+            Text(
+                text = aiTranscript,
+                color = Color.White,
+                fontSize = 13.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -201,7 +176,7 @@ fun ToolCallStatusView(
 ) {
     Row(
         modifier = modifier
-            .background(AppColor.SurfaceMuted, RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -210,26 +185,27 @@ fun ToolCallStatusView(
             is ToolCallStatus.Executing -> {
                 CircularProgressIndicator(
                     modifier = Modifier.size(14.dp),
-                    color = AppColor.DeepBlue,
+                    color = Color.White,
                     strokeWidth = 2.dp,
                 )
             }
             is ToolCallStatus.Completed -> {
-                Text(text = "OK", color = AppColor.Green, fontSize = 12.sp)
+                Text(text = "[OK]", color = Color(0xFF4CAF50), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
             is ToolCallStatus.Failed -> {
-                Text(text = "X", color = AppColor.Red, fontSize = 12.sp)
+                Text(text = "[X]", color = Color(0xFFF44336), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
             is ToolCallStatus.Cancelled -> {
-                Text(text = "--", color = Color(0xFFE7A400), fontSize = 12.sp)
+                Text(text = "[--]", color = Color(0xFFFF9800), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
             else -> {}
         }
         Text(
             text = status.displayText,
-            color = AppColor.TextSecondary,
+            color = Color.White.copy(alpha = 0.8f),
             fontSize = 12.sp,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -239,7 +215,7 @@ fun SpeakingIndicator(modifier: Modifier = Modifier) {
     val infiniteTransition = rememberInfiniteTransition(label = "speaking")
     Row(
         modifier = modifier
-            .background(AppColor.SurfaceMuted, RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -259,10 +235,10 @@ fun SpeakingIndicator(modifier: Modifier = Modifier) {
                     .width(3.dp)
                     .height(height.dp)
                     .clip(RoundedCornerShape(1.5.dp))
-                    .background(AppColor.DeepBlue),
+                    .background(Color.White),
             )
         }
         Spacer(modifier = Modifier.width(6.dp))
-        Text(text = "Speaking", color = AppColor.TextSecondary, fontSize = 11.sp)
+        Text(text = "Speaking", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
     }
 }

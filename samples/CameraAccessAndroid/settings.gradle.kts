@@ -41,10 +41,7 @@ dependencyResolutionManagement {
     maven {
       url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
       credentials {
-        username =
-            System.getenv("GITHUB_ACTOR")
-                ?: localProperties.getProperty("github_username")
-                ?: "blockchainMania"
+        username = "" // not needed
         password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
       }
     }

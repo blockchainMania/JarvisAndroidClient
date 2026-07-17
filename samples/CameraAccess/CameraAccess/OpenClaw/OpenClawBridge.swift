@@ -18,8 +18,6 @@ class OpenClawBridge: ObservableObject {
   private var conversationHistory: [[String: String]] = []
   private let maxHistoryTurns = 10
 
-  private static let stableSessionKey = "agent:main:glass"
-
   init() {
     let config = URLSessionConfiguration.default
     config.timeoutIntervalForRequest = 120
@@ -29,7 +27,7 @@ class OpenClawBridge: ObservableObject {
     pingConfig.timeoutIntervalForRequest = 5
     self.pingSession = URLSession(configuration: pingConfig)
 
-    self.sessionKey = OpenClawBridge.stableSessionKey
+    self.sessionKey = OpenClawBridge.newSessionKey()
   }
 
   func checkConnection() async {
@@ -45,7 +43,6 @@ class OpenClawBridge: ObservableObject {
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
-    request.setValue("glass", forHTTPHeaderField: "x-openclaw-message-channel")
     do {
       let (_, response) = try await pingSession.data(for: request)
       if let http = response as? HTTPURLResponse, (200...499).contains(http.statusCode) {
@@ -61,8 +58,14 @@ class OpenClawBridge: ObservableObject {
   }
 
   func resetSession() {
+    sessionKey = OpenClawBridge.newSessionKey()
     conversationHistory = []
-    NSLog("[OpenClaw] Session reset (key retained: %@)", sessionKey)
+    NSLog("[OpenClaw] New session: %@", sessionKey)
+  }
+
+  private static func newSessionKey() -> String {
+    let ts = ISO8601DateFormatter().string(from: Date())
+    return "agent:main:glass:\(ts)"
   }
 
   // MARK: - Agent Chat (session continuity via x-openclaw-session-key header)
@@ -91,7 +94,6 @@ class OpenClawBridge: ObservableObject {
     request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue(sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
-    request.setValue("glass", forHTTPHeaderField: "x-openclaw-message-channel")
 
     let body: [String: Any] = [
       "model": "openclaw",

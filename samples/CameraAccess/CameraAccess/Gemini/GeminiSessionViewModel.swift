@@ -15,7 +15,6 @@ class GeminiSessionViewModel: ObservableObject {
   private let openClawBridge = OpenClawBridge()
   private var toolCallRouter: ToolCallRouter?
   private let audioManager = AudioManager()
-  private let eventClient = OpenClawEventClient()
   private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
 
@@ -35,10 +34,9 @@ class GeminiSessionViewModel: ObservableObject {
     audioManager.onAudioCaptured = { [weak self] data in
       guard let self else { return }
       Task { @MainActor in
-        // Mute mic while model speaks when speaker is on the phone
+        // iPhone mode: mute mic while model speaks to prevent echo feedback
         // (loudspeaker + co-located mic overwhelms iOS echo cancellation)
-        let speakerOnPhone = self.streamingMode == .iPhone || SettingsManager.shared.speakerOutputEnabled
-        if speakerOnPhone && self.geminiService.isModelSpeaking { return }
+        if self.streamingMode == .iPhone && self.geminiService.isModelSpeaking { return }
         self.geminiService.sendAudio(data: data)
       }
     }
@@ -162,22 +160,9 @@ class GeminiSessionViewModel: ObservableObject {
       connectionState = .disconnected
       return
     }
-
-    // Connect to OpenClaw event stream for proactive notifications
-    if SettingsManager.shared.proactiveNotificationsEnabled {
-      eventClient.onNotification = { [weak self] text in
-        guard let self else { return }
-        Task { @MainActor in
-          guard self.isGeminiActive, self.connectionState == .ready else { return }
-          self.geminiService.sendTextMessage(text)
-        }
-      }
-      eventClient.connect()
-    }
   }
 
   func stopSession() {
-    eventClient.disconnect()
     toolCallRouter?.cancelAll()
     toolCallRouter = nil
     audioManager.stopCapture()
@@ -193,7 +178,6 @@ class GeminiSessionViewModel: ObservableObject {
   }
 
   func sendVideoFrameIfThrottled(image: UIImage) {
-    guard SettingsManager.shared.videoStreamingEnabled else { return }
     guard isGeminiActive, connectionState == .ready else { return }
     let now = Date()
     guard now.timeIntervalSince(lastVideoFrameTime) >= GeminiConfig.videoFrameInterval else { return }

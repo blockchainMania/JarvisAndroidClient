@@ -13,14 +13,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,39 +42,36 @@ fun SettingsScreen(
 ) {
     var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
-    var jarvisApiBase by remember { mutableStateOf(SettingsManager.jarvisApiBase) }
-    var jarvisApiKey by remember { mutableStateOf(SettingsManager.jarvisApiKey) }
+    var openClawHost by remember { mutableStateOf(SettingsManager.openClawHost) }
+    var openClawPort by remember { mutableStateOf(SettingsManager.openClawPort.toString()) }
+    var openClawHookToken by remember { mutableStateOf(SettingsManager.openClawHookToken) }
+    var openClawGatewayToken by remember { mutableStateOf(SettingsManager.openClawGatewayToken) }
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
-    var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
-    var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
-    var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
     var showResetDialog by remember { mutableStateOf(false) }
 
     fun save() {
         SettingsManager.geminiAPIKey = geminiAPIKey.trim()
         SettingsManager.geminiSystemPrompt = systemPrompt.trim()
-        SettingsManager.jarvisApiBase = jarvisApiBase.trim()
-        SettingsManager.jarvisApiKey = jarvisApiKey.trim()
+        SettingsManager.openClawHost = openClawHost.trim()
+        openClawPort.trim().toIntOrNull()?.let { SettingsManager.openClawPort = it }
+        SettingsManager.openClawHookToken = openClawHookToken.trim()
+        SettingsManager.openClawGatewayToken = openClawGatewayToken.trim()
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
-        SettingsManager.videoStreamingEnabled = videoStreamingEnabled
-        SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
-        SettingsManager.speechRecognizerProvider = if (whisperSttEnabled) "whisper" else "android"
     }
 
     fun reload() {
         geminiAPIKey = SettingsManager.geminiAPIKey
         systemPrompt = SettingsManager.geminiSystemPrompt
-        jarvisApiBase = SettingsManager.jarvisApiBase
-        jarvisApiKey = SettingsManager.jarvisApiKey
+        openClawHost = SettingsManager.openClawHost
+        openClawPort = SettingsManager.openClawPort.toString()
+        openClawHookToken = SettingsManager.openClawHookToken
+        openClawGatewayToken = SettingsManager.openClawGatewayToken
         webrtcSignalingURL = SettingsManager.webrtcSignalingURL
-        videoStreamingEnabled = SettingsManager.videoStreamingEnabled
-        proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
-        whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Jarvis 설정") },
+            title = { Text("Settings") },
             navigationIcon = {
                 IconButton(onClick = {
                     save()
@@ -113,104 +108,48 @@ fun SettingsScreen(
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             )
 
-            SectionHeader("Jarvis Memory Server")
+            // OpenClaw section
+            SectionHeader("OpenClaw")
             MonoTextField(
-                value = jarvisApiBase,
-                onValueChange = { jarvisApiBase = it },
-                label = "API URL",
-                placeholder = "https://your-tunnel.trycloudflare.com",
+                value = openClawHost,
+                onValueChange = { openClawHost = it },
+                label = "Host",
+                placeholder = "http://your-mac.local",
                 keyboardType = KeyboardType.Uri,
             )
             MonoTextField(
-                value = jarvisApiKey,
-                onValueChange = { jarvisApiKey = it },
-                label = "API Key",
-                placeholder = "Jarvis server API key",
+                value = openClawPort,
+                onValueChange = { openClawPort = it },
+                label = "Port",
+                placeholder = "18789",
+                keyboardType = KeyboardType.Number,
+            )
+            MonoTextField(
+                value = openClawHookToken,
+                onValueChange = { openClawHookToken = it },
+                label = "Hook Token",
+                placeholder = "Hook token",
+            )
+            MonoTextField(
+                value = openClawGatewayToken,
+                onValueChange = { openClawGatewayToken = it },
+                label = "Gateway Token",
+                placeholder = "Gateway auth token",
             )
 
             // WebRTC section
-            SectionHeader("Live Share")
+            SectionHeader("WebRTC")
             MonoTextField(
                 value = webrtcSignalingURL,
                 onValueChange = { webrtcSignalingURL = it },
                 label = "Signaling URL",
-                placeholder = "Auto: Jarvis API /live/ws",
+                placeholder = "wss://your-server.example.com",
                 keyboardType = KeyboardType.Uri,
             )
 
-            // Speech recognition
-            SectionHeader("Speech Recognition")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        if (whisperSttEnabled) "Whisper.cpp STT" else "Android Korean STT",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        if (whisperSttEnabled) {
-                            "Experimental offline mode. Slower, but useful for accuracy comparison."
-                        } else {
-                            "Default stable mode. Faster startup and better for daily testing."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = whisperSttEnabled,
-                    onCheckedChange = { whisperSttEnabled = it },
-                )
-            }
-
-            // Video
-            SectionHeader("Video")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            ) {
-                Column {
-                    Text("연속 영상 전송", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "일상 테스트에서는 꺼두세요. Jarvis는 필요한 순간의 이미지만 캡처합니다.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = videoStreamingEnabled,
-                    onCheckedChange = { videoStreamingEnabled = it },
-                )
-            }
-
-            // Notifications
-            SectionHeader("Jarvis 알림")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            ) {
-                Column {
-                    Text("서버 알림 음성 안내", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Jarvis 서버에서 온 알림을 글라스 스피커로 안내합니다.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = proactiveNotificationsEnabled,
-                    onCheckedChange = { proactiveNotificationsEnabled = it },
-                )
-            }
-
             // Reset
             TextButton(onClick = { showResetDialog = true }) {
-                Text("기본값으로 초기화", color = Color.Red)
+                Text("Reset to Defaults", color = Color.Red)
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -220,20 +159,20 @@ fun SettingsScreen(
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("설정 초기화") },
-            text = { Text("앱에 포함된 기본 설정으로 되돌립니다.") },
+            title = { Text("Reset Settings") },
+            text = { Text("This will reset all settings to the values built into the app.") },
             confirmButton = {
                 TextButton(onClick = {
                     SettingsManager.resetAll()
                     reload()
                     showResetDialog = false
                 }) {
-                    Text("초기화", color = Color.Red)
+                    Text("Reset", color = Color.Red)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) {
-                    Text("취소")
+                    Text("Cancel")
                 }
             },
         )

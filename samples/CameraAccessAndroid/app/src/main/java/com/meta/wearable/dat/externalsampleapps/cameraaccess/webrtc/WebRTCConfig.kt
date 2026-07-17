@@ -1,10 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc
 
 import android.util.Log
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -29,35 +26,10 @@ object WebRTCConfig {
     private const val TURN_CREDENTIALS_URL = "https://visionclaw-turn-creds.fly.dev/credentials"
 
     val signalingServerURL: String
-        get() {
-            val configured = SettingsManager.webrtcSignalingURL.trim()
-            if (isUsableSignalingUrl(configured)) {
-                return configured
-            }
-            return "${liveBaseUrl().replaceFirst("https://", "wss://").replaceFirst("http://", "ws://")}/ws"
-        }
+        get() = SettingsManager.webrtcSignalingURL
 
     val isConfigured: Boolean
-        get() {
-            val url = signalingServerURL
-            return (url.startsWith("wss://") || url.startsWith("ws://")) &&
-                !url.contains("YOUR_HOST") &&
-                !url.contains("YOUR_SIGNALING_SERVER")
-        }
-
-    fun viewerUrl(roomCode: String): String {
-        val encoded = URLEncoder.encode(roomCode, StandardCharsets.UTF_8.name())
-        return "${liveBaseUrl().replaceFirst("ws://", "http://").replaceFirst("wss://", "https://")}/watch?room=$encoded"
-    }
-
-    private fun liveBaseUrl(): String = "${GeminiConfig.jarvisApiBase.trimEnd('/')}/live"
-
-    private fun isUsableSignalingUrl(url: String): Boolean {
-        if (url.isBlank()) return false
-        if (url.contains("YOUR_SIGNALING_SERVER")) return false
-        if (url.contains("YOUR_HOST")) return false
-        return url.startsWith("wss://") || url.startsWith("ws://")
-    }
+        get() = signalingServerURL.isNotBlank() && signalingServerURL.startsWith("wss://")
 
     /**
      * Fetch TURN credentials from the credential server, falling back to STUN-only if unavailable.

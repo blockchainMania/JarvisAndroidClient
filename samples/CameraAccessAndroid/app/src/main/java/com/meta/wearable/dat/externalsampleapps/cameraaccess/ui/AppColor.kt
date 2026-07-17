@@ -17,19 +17,4 @@ object AppColor {
   val DeepBlue = Color(0xFF0064E0)
   val DestructiveBackground = Color(0xFFFFD8DB)
   val DestructiveForeground = Color(0xFFAA071E)
-
-  // Minimal/monotone UI tokens. DeepBlue stays the single accent color;
-  // everything else is neutral grayscale so accent/status colors keep meaning.
-  val Background = Color(0xFFF7F8FA)
-  val Surface = Color.White
-  val Border = Color(0xFFE5E7EB)
-  val SurfaceMuted = Color(0xFFF1F2F4)
-  val TextPrimary = Color(0xFF111827)
-  val TextSecondary = Color(0xFF6B7280)
-
-  // Chat bubble tokens (Gemini conversation area)
-  val UserBubble = DeepBlue
-  val UserBubbleText = Color.White
-  val AiBubble = Color.White
-  val AiBubbleText = TextPrimary
 }

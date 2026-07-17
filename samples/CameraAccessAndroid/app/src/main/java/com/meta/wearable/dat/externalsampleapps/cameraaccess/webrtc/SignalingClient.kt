@@ -37,7 +37,7 @@ class SignalingClient {
     private val sendExecutor = Executors.newSingleThreadExecutor()
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS) // No read timeout for WebSocket
-        .connectTimeout(8, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
         .build()
 
     fun connect(url: String) {
@@ -68,10 +68,8 @@ class SignalingClient {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                val status = response?.code?.let { " HTTP $it" } ?: ""
-                val message = "Failed to connect to $url$status: ${t.message ?: "Unknown error"}"
-                Log.e(TAG, message)
-                onDisconnected?.invoke(message)
+                Log.e(TAG, "Failure: ${t.message}")
+                onDisconnected?.invoke(t.message)
             }
         })
     }

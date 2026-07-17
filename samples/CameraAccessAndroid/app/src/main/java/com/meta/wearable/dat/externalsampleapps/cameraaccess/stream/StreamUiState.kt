@@ -24,5 +24,4 @@ data class StreamUiState(
     val isShareDialogVisible: Boolean = false,
     val isCapturing: Boolean = false,
     val streamingMode: StreamingMode = StreamingMode.GLASSES,
-    val errorMessage: String? = null,
 )

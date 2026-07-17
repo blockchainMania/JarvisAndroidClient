@@ -1,16 +1,11 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
-// NOTE: This file replaces the original OpenClaw integration with a typed
-// HTTP client for the **Jarvis Memory API**. Class name `OpenClawBridge` is
-// preserved so the existing wiring in GeminiSessionViewModel / GeminiLiveService
-// keeps compiling. Internally it is a Jarvis client. Rename to JarvisBridge
-// in a follow-up if you want.
-
 import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
-import java.time.ZoneId
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +21,8 @@ import org.json.JSONObject
 
 class OpenClawBridge {
     companion object {
-        private const val TAG = "JarvisBridge"
+        private const val TAG = "OpenClawBridge"
+        private const val MAX_HISTORY_TURNS = 10
     }
 
     private val _lastToolCallStatus = MutableStateFlow<ToolCallStatus>(ToolCallStatus.Idle)
@@ -40,7 +36,7 @@ class OpenClawBridge {
     }
 
     private val client = OkHttpClient.Builder()
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .build()
 
@@ -49,214 +45,134 @@ class OpenClawBridge {
         .connectTimeout(5, TimeUnit.SECONDS)
         .build()
 
-    private val jsonMediaType = "application/json".toMediaType()
+    private var sessionKey: String = newSessionKey()
+    private val conversationHistory = mutableListOf<JSONObject>()
 
-    private fun baseUrl(): String = GeminiConfig.jarvisApiBase.trimEnd('/')
-
-    private fun nowKstIso(): String =
-        ZonedDateTime.now(ZoneId.of("Asia/Seoul")).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-
-    // ─── Connection check (used by UI badge) ─────────────────────
     suspend fun checkConnection() = withContext(Dispatchers.IO) {
-        if (!GeminiConfig.isJarvisConfigured) {
+        if (!GeminiConfig.isOpenClawConfigured) {
             _connectionState.value = OpenClawConnectionState.NotConfigured
             return@withContext
         }
         _connectionState.value = OpenClawConnectionState.Checking
+
+        val url = "${GeminiConfig.openClawHost}:${GeminiConfig.openClawPort}/v1/chat/completions"
         try {
             val request = Request.Builder()
-                .url("${baseUrl()}/health")
+                .url(url)
                 .get()
+                .addHeader("Authorization", "Bearer ${GeminiConfig.openClawGatewayToken}")
                 .build()
+
             val response = pingClient.newCall(request).execute()
             val code = response.code
             response.close()
-            if (code == 200) {
+
+            if (code in 200..499) {
                 _connectionState.value = OpenClawConnectionState.Connected
-                Log.d(TAG, "Jarvis API reachable")
+                Log.d(TAG, "Gateway reachable (HTTP $code)")
             } else {
-                _connectionState.value = OpenClawConnectionState.Unreachable("HTTP $code")
+                _connectionState.value = OpenClawConnectionState.Unreachable("Unexpected response")
             }
         } catch (e: Exception) {
-            _connectionState.value = OpenClawConnectionState.Unreachable(e.message ?: "Unknown")
-            Log.d(TAG, "Jarvis API unreachable: ${e.message}")
+            _connectionState.value = OpenClawConnectionState.Unreachable(e.message ?: "Unknown error")
+            Log.d(TAG, "Gateway unreachable: ${e.message}")
         }
     }
 
     fun resetSession() {
-        // Stateless: no conversation history kept on this side.
+        sessionKey = newSessionKey()
+        conversationHistory.clear()
+        Log.d(TAG, "New session: $sessionKey")
     }
 
-    // ─── Typed dispatch — called by ToolCallRouter ───────────────
-    suspend fun dispatch(toolName: String, args: Map<String, Any?>): ToolResult =
-        withContext(Dispatchers.IO) {
-            _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
-            val result: ToolResult = try {
-                when (toolName) {
-                    "save_person" -> {
-                        val body = pick(args, "name", "aliases", "org", "role",
-                                   "first_met_at", "last_met_at", "notes_summary")
-                        val attachPhoto = args["attach_current_photo"] == true ||
-                            args["attach_current_photo"]?.toString() == "true"
-                        if (attachPhoto) {
-                            val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
-                            if (visualFrame != null) {
-                                body.put("image_base64", visualFrame.base64)
-                                body.put("image_mime_type", "image/jpeg")
-                            }
-                            // No fresh frame available -- save without a photo rather than
-                            // failing the whole request; name/org/role are still useful alone.
-                        }
-                        post("/people", body)
-                    }
-                    "identify_person" -> {
-                        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
-                            ?: return@withContext ToolResult.Failure(
-                                "No fresh camera image is available. Ask the user to hold still and retry."
-                            )
-                        post(
-                            "/people/identify",
-                            JSONObject()
-                                .put("image_base64", visualFrame.base64)
-                                .put("image_mime_type", "image/jpeg")
-                        )
-                    }
-                    "search_people" -> post(
-                        "/people/search",
-                        pick(args, "query", "top_k")
-                    )
-                    "save_meeting" -> post(
-                        "/meetings",
-                        pick(args, "title", "person_ids", "started_at", "ended_at",
-                                   "location", "summary", "raw_transcript")
-                    )
-                    "search_meetings" -> post(
-                        "/meetings/search",
-                        pick(args, "query", "top_k", "time_from", "time_to", "person_id")
-                    )
-                    "save_memory" -> post(
-                        "/memory/save",
-                        pick(args, "text", "captured_at", "related_person_ids",
-                                   "related_meeting_id", "source")
-                    )
-                    "save_life_memory" -> {
-                        val body = pick(
-                            args,
-                            "user_note",
-                            "ai_interpretation",
-                            "people_text",
-                            "labels",
-                            "entities",
-                            "related_person_ids",
-                            "source",
-                        )
-                        val capturedAtKst = nowKstIso()
-                        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
-                            ?: return@withContext ToolResult.Failure(
-                                "No fresh camera image is available. Ask the user to hold still for a moment and try saving again."
-                            )
-                        body.put("captured_at", capturedAtKst)
-                        body.put("image_base64", visualFrame.base64)
-                        body.put("image_mime_type", "image/jpeg")
-                        body.put(
-                            "metadata",
-                            JSONObject()
-                                .put("captured_at_kst", capturedAtKst)
-                                .put("frame_captured_at_ms", visualFrame.capturedAtMs)
-                                .put("frame_age_ms_at_save", visualFrame.ageMs)
-                                .put("visual_source", visualFrame.source)
-                                .put("visual_width", visualFrame.width)
-                                .put("visual_height", visualFrame.height)
-                                .put("visual_jpeg_bytes", visualFrame.jpegBytes)
-                                .put("source_device", "meta_rayban_or_phone_camera")
-                        )
-                        post("/memory/life/save", body)
-                    }
-                    "search_memory" -> post(
-                        "/memory/search",
-                        pick(args, "query", "top_k", "time_from", "time_to", "person_id")
-                    )
-                    "universal_search" -> post(
-                        "/memory/universal-search",
-                        pick(args, "query", "top_k", "time_from", "time_to", "person_id")
-                    )
-                    "save_need" -> post(
-                        "/needs",
-                        pick(args, "person_id", "meeting_id", "text", "category", "confidence")
-                    )
-                    "get_proposal_context" -> {
-                        val pid = args["person_id"]?.toString()
-                            ?: return@withContext ToolResult.Failure("person_id required")
-                        get("/people/$pid/context")
-                    }
-                    else -> ToolResult.Failure("Unknown tool: $toolName")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Tool $toolName error: ${e.message}")
-                ToolResult.Failure(e.message ?: "Unknown error")
+    suspend fun delegateTask(
+        task: String,
+        toolName: String = "execute"
+    ): ToolResult = withContext(Dispatchers.IO) {
+        _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
+
+        val url = "${GeminiConfig.openClawHost}:${GeminiConfig.openClawPort}/v1/chat/completions"
+
+        // Append user message
+        conversationHistory.add(JSONObject().apply {
+            put("role", "user")
+            put("content", task)
+        })
+
+        // Trim history
+        if (conversationHistory.size > MAX_HISTORY_TURNS * 2) {
+            val trimmed = conversationHistory.takeLast(MAX_HISTORY_TURNS * 2)
+            conversationHistory.clear()
+            conversationHistory.addAll(trimmed)
+        }
+
+        Log.d(TAG, "Sending ${conversationHistory.size} messages in conversation")
+
+        try {
+            val messagesArray = JSONArray()
+            for (msg in conversationHistory) {
+                messagesArray.put(msg)
             }
-            _lastToolCallStatus.value = when (result) {
-                is ToolResult.Success -> ToolCallStatus.Completed(toolName)
-                is ToolResult.Failure -> ToolCallStatus.Failed(toolName, result.error)
+
+            val body = JSONObject().apply {
+                put("model", "openclaw")
+                put("messages", messagesArray)
+                put("stream", false)
             }
-            result
-        }
 
-    // ─── Backward-compatible single-task entrypoint ──────────────
-    // Legacy callers (e.g. an `execute(task=...)` Gemini tool, if you ever
-    // re-add one) will be routed here. Default behavior: treat the task as
-    // a memory search query.
-    suspend fun delegateTask(task: String, toolName: String = "execute"): ToolResult {
-        return dispatch("search_memory", mapOf("query" to task, "top_k" to 5))
-    }
+            val request = Request.Builder()
+                .url(url)
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer ${GeminiConfig.openClawGatewayToken}")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("x-openclaw-session-key", sessionKey)
+                .build()
 
-    // ─── HTTP helpers ────────────────────────────────────────────
-    private fun pick(args: Map<String, Any?>, vararg allowed: String): JSONObject {
-        val allowSet = allowed.toSet()
-        val o = JSONObject()
-        for ((k, v) in args) {
-            if (k !in allowSet) continue
-            if (v == null || v == JSONObject.NULL) continue
-            o.put(k, v)  // org.json handles String/Int/Double/Boolean/JSONObject/JSONArray
-        }
-        return o
-    }
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string() ?: ""
+            val statusCode = response.code
+            response.close()
 
-    private fun post(path: String, body: JSONObject): ToolResult {
-        val request = Request.Builder()
-            .url("${baseUrl()}$path")
-            .post(body.toString().toRequestBody(jsonMediaType))
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
-            .addHeader("Content-Type", "application/json")
-            .build()
-        return execute(request, "POST $path", body)
-    }
+            if (statusCode !in 200..299) {
+                Log.d(TAG, "Chat failed: HTTP $statusCode - ${responseBody.take(200)}")
+                _lastToolCallStatus.value = ToolCallStatus.Failed(toolName, "HTTP $statusCode")
+                return@withContext ToolResult.Failure("Agent returned HTTP $statusCode")
+            }
 
-    private fun get(path: String): ToolResult {
-        val request = Request.Builder()
-            .url("${baseUrl()}$path")
-            .get()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
-            .build()
-        return execute(request, "GET $path", null)
-    }
+            val json = JSONObject(responseBody)
+            val choices = json.optJSONArray("choices")
+            val content = choices?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content", "")
 
-    private fun execute(request: Request, label: String, requestBody: JSONObject?): ToolResult {
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: ""
-        val statusCode = response.code
-        response.close()
-        if (requestBody != null) Log.d(TAG, "$label body=${requestBody.toString().take(200)}")
-        Log.d(TAG, "$label -> HTTP $statusCode resp=${responseBody.take(200)}")
-        return if (statusCode in 200..299) {
-            ToolResult.Success(responseBody)
-        } else {
-            ToolResult.Failure("HTTP $statusCode: ${responseBody.take(200)}")
+            if (!content.isNullOrEmpty()) {
+                conversationHistory.add(JSONObject().apply {
+                    put("role", "assistant")
+                    put("content", content)
+                })
+                Log.d(TAG, "Agent result: ${content.take(200)}")
+                _lastToolCallStatus.value = ToolCallStatus.Completed(toolName)
+                return@withContext ToolResult.Success(content)
+            }
+
+            conversationHistory.add(JSONObject().apply {
+                put("role", "assistant")
+                put("content", responseBody)
+            })
+            Log.d(TAG, "Agent raw: ${responseBody.take(200)}")
+            _lastToolCallStatus.value = ToolCallStatus.Completed(toolName)
+            return@withContext ToolResult.Success(responseBody)
+        } catch (e: Exception) {
+            Log.e(TAG, "Agent error: ${e.message}")
+            _lastToolCallStatus.value = ToolCallStatus.Failed(toolName, e.message ?: "Unknown")
+            return@withContext ToolResult.Failure("Agent error: ${e.message}")
         }
     }
 
-    // Keep these symbols referenced so unused-import lints stay quiet if
-    // a downstream file imports JSONArray transitively. No runtime effect.
-    @Suppress("unused")
-    private fun debugArray(a: JSONArray) = a.length()
+    private fun newSessionKey(): String {
+        val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        formatter.timeZone = TimeZone.getTimeZone("UTC")
+        val ts = formatter.format(Date())
+        return "agent:main:glass:$ts"
+    }
 }

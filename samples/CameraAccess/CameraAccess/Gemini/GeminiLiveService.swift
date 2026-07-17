@@ -154,20 +154,6 @@ class GeminiLiveService: ObservableObject {
     }
   }
 
-  func sendTextMessage(_ text: String) {
-    guard connectionState == .ready else { return }
-    sendQueue.async { [weak self] in
-      let msg: [String: Any] = [
-        "clientContent": [
-          "turns": [
-            ["role": "user", "parts": [["text": text]]]
-          ]
-        ]
-      ]
-      self?.sendJSON(msg)
-    }
-  }
-
   // MARK: - Private
 
   private func resolveConnect(success: Bool) {
@@ -207,11 +193,6 @@ class GeminiLiveService: ObservableObject {
           ],
           "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
           "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
-        ],
-        "contextWindowCompression": [
-          "slidingWindow": [
-            "targetTokens": 80000
-          ]
         ],
         "inputAudioTranscription": [:] as [String: Any],
         "outputAudioTranscription": [:] as [String: Any]

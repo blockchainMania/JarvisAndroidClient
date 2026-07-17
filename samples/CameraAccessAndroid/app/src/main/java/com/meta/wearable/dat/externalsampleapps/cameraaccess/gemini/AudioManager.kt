@@ -35,13 +35,40 @@ class AudioManager {
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-        audioRecord = buildAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, bufferSize)
-            .takeIf { it.state == AudioRecord.STATE_INITIALIZED }
-            ?: buildAudioRecord(MediaRecorder.AudioSource.MIC, bufferSize)
+        audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            GeminiConfig.INPUT_AUDIO_SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize
+        )
 
-        startPlayback()
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .setBufferSizeInBytes(
+                AudioTrack.getMinBufferSize(
+                    GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                ) * 2
+            )
+            .build()
 
         audioRecord?.startRecording()
+        audioTrack?.play()
         isCapturing = true
 
         synchronized(accumulateLock) {
@@ -70,54 +97,11 @@ class AudioManager {
             }
         }, "audio-capture").also { it.start() }
 
-        Log.d(TAG, "Audio capture started (16kHz mono PCM16, voice recognition source)")
+        Log.d(TAG, "Audio capture started (16kHz mono PCM16)")
     }
-
-    fun startPlayback() {
-        if (audioTrack != null) return
-        audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .build()
-            )
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(
-                AudioTrack.getMinBufferSize(
-                    GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE,
-                    AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT
-                ) * 2
-            )
-            .build()
-
-        audioTrack?.play()
-        Log.d(TAG, "Audio playback started (24kHz mono PCM16)")
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun buildAudioRecord(source: Int, bufferSize: Int): AudioRecord =
-        AudioRecord(
-            source,
-            GeminiConfig.INPUT_AUDIO_SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize
-        )
 
     fun playAudio(data: ByteArray) {
-        if (data.isEmpty()) return
-        if (audioTrack == null) {
-            startPlayback()
-        }
+        if (!isCapturing || data.isEmpty()) return
         audioTrack?.write(data, 0, data.size)
     }
 
@@ -128,7 +112,7 @@ class AudioManager {
     }
 
     fun stopCapture() {
-        if (!isCapturing && audioRecord == null && audioTrack == null) return
+        if (!isCapturing) return
         isCapturing = false
 
         captureThread?.join(1000)
