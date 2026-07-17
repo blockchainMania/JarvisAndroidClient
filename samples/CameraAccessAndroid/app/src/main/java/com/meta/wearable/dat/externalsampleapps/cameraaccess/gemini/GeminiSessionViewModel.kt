@@ -72,6 +72,14 @@ data class CachedVisualRead(
     val businessCard: GeminiFlashVisionClient.BusinessCard? = null,
 )
 
+// One (user utterance, final spoken answer) pair kept for short-term conversational memory --
+// see MAX_CONVERSATION_HISTORY_TURNS in GeminiSessionViewModel.
+data class ConversationTurn(
+    val userText: String,
+    val answerText: String,
+    val atMs: Long,
+)
+
 class GeminiSessionViewModel : ViewModel() {
     companion object {
         private const val TAG = "GeminiSessionVM"
@@ -102,6 +110,14 @@ class GeminiSessionViewModel : ViewModel() {
         // How long a terminal tool-call status ("저장 완료" etc.) stays on screen before the
         // banner auto-hides.
         private const val TOOL_STATUS_AUTO_DISMISS_MS = 3_500L
+
+        // Short-term conversational memory: each root agent call is otherwise stateless (see
+        // JARVIS_ROOT_AGENT_ARCHITECTURE_KO.md Phase 2), so a follow-up like "연락처도 알려줘"
+        // had nothing to anchor "누구?" to. Replaying just the last few (user text, final spoken
+        // answer) pairs -- not raw tool results -- gives the model enough to re-run its own
+        // search with the missing context filled in, without ballooning prompt size.
+        private const val MAX_CONVERSATION_HISTORY_TURNS = 6
+        private const val CONVERSATION_HISTORY_TTL_MS = 5 * 60_000L
 
         private const val ROOT_AGENT_SYSTEM_INSTRUCTION = """당신은 Jarvis 개인 비서의 판단 담당(루트 에이전트)입니다. 사용자 발화(음성 인식된 텍스트)를 보고 어떤 도구를 호출할지, 또는 도구 없이 바로 답할지 결정하세요. 당신의 텍스트 답변은 다른 컴포넌트가 그대로 소리 내어 읽으므로, 자연스러운 한국어 구어체로 짧게 쓰세요.
 
@@ -156,6 +172,7 @@ class GeminiSessionViewModel : ViewModel() {
     private var usingFallbackAndroidStt: Boolean = false
     private var pendingToolConfirmation: PendingToolConfirmation? = null
     private var cachedVisualRead: CachedVisualRead? = null
+    private val conversationHistory = ArrayDeque<ConversationTurn>()
 
     private val _voiceCommands = MutableSharedFlow<MeetingVoiceCommand>(extraBufferCapacity = 4)
     val voiceCommands: SharedFlow<MeetingVoiceCommand> = _voiceCommands.asSharedFlow()
@@ -397,6 +414,7 @@ class GeminiSessionViewModel : ViewModel() {
         usingFallbackAndroidStt = false
         pendingToolConfirmation = null
         cachedVisualRead = null
+        conversationHistory.clear()
         isProcessingUtterance = false
         _uiState.value = GeminiUiState()
     }
@@ -540,7 +558,7 @@ class GeminiSessionViewModel : ViewModel() {
             return
         }
         Log.d(TAG, "Gemini Flash canRead=${result.canRead}")
-        geminiService.sendTextMessage(TTS_ONLY_PREFIX + result.answer)
+        speakAndRemember(text, result.answer)
     }
 
     /**
@@ -570,6 +588,28 @@ class GeminiSessionViewModel : ViewModel() {
         return null
     }
 
+    private fun pruneStaleConversationHistory() {
+        val cutoff = System.currentTimeMillis() - CONVERSATION_HISTORY_TTL_MS
+        while (conversationHistory.isNotEmpty() && conversationHistory.first().atMs < cutoff) {
+            conversationHistory.removeFirst()
+        }
+    }
+
+    private fun rememberConversationTurn(userText: String, answerText: String) {
+        pruneStaleConversationHistory()
+        conversationHistory.addLast(ConversationTurn(userText, answerText, System.currentTimeMillis()))
+        while (conversationHistory.size > MAX_CONVERSATION_HISTORY_TURNS) {
+            conversationHistory.removeFirst()
+        }
+    }
+
+    /** Sends the final spoken answer for this turn and records it as conversational history in
+     * one place, so no call site can send an answer without also remembering it. */
+    private fun speakAndRemember(userText: String, answer: String) {
+        geminiService.sendTextMessage(TTS_ONLY_PREFIX + answer)
+        rememberConversationTurn(userText, answer)
+    }
+
     private suspend fun runRootAgent(text: String) {
         val hasExplicitSaveIntent = SAVE_INTENT_KEYWORDS.any { text.contains(it) }
         val wantsFreshCapture = RECAPTURE_KEYWORDS.any { text.contains(it) }
@@ -592,6 +632,17 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         val contents = JSONArray()
+        pruneStaleConversationHistory()
+        for (turn in conversationHistory) {
+            contents.put(JSONObject().apply {
+                put("role", "user")
+                put("parts", JSONArray().put(JSONObject().put("text", turn.userText)))
+            })
+            contents.put(JSONObject().apply {
+                put("role", "model")
+                put("parts", JSONArray().put(JSONObject().put("text", turn.answerText)))
+            })
+        }
         if (cacheIsFresh) {
             // Any other follow-up about the same subject ("출력해줘", "전화번호가 뭐야", "다시
             // 말해줘"...) shouldn't force a brand new photo either -- replay the cached read as a
@@ -643,7 +694,7 @@ class GeminiSessionViewModel : ViewModel() {
                         TTS_ONLY_PREFIX + "죄송해요, 답을 잘 못 만들었어요. 다시 한번 말씀해주시겠어요?"
                     )
                 } else {
-                    geminiService.sendTextMessage(TTS_ONLY_PREFIX + answer)
+                    speakAndRemember(text, answer)
                 }
                 return
             }
@@ -653,7 +704,7 @@ class GeminiSessionViewModel : ViewModel() {
             if (call.name in CONFIRM_REQUIRED_TOOLS && !hasExplicitSaveIntent) {
                 pendingToolConfirmation = PendingToolConfirmation(call.name, call.args)
                 val question = step.text?.takeIf { it.isNotBlank() } ?: "이 내용으로 저장할까요?"
-                geminiService.sendTextMessage(TTS_ONLY_PREFIX + question)
+                speakAndRemember(text, question)
                 return
             }
 
@@ -759,7 +810,7 @@ class GeminiSessionViewModel : ViewModel() {
             is ToolResult.Success -> "저장했습니다."
             is ToolResult.Failure -> "저장하지 못했어요: ${result.error}"
         }
-        geminiService.sendTextMessage(TTS_ONLY_PREFIX + spoken)
+        speakAndRemember(userNote, spoken)
     }
 
     private fun confirmPendingToolCall() {
@@ -865,6 +916,7 @@ class GeminiSessionViewModel : ViewModel() {
             usingFallbackAndroidStt = false
             pendingToolConfirmation = null
             cachedVisualRead = null
+            conversationHistory.clear()
             isProcessingUtterance = false
             _uiState.value = GeminiUiState()
             delay(1_200L)
