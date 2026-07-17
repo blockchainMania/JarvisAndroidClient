@@ -410,8 +410,14 @@ class GeminiSessionViewModel : ViewModel() {
         pendingSpeechJob = viewModelScope.launch {
             // Secondary safety net for when KoreanSpeechRecognizer still splits an utterance
             // despite its own extended silence thresholds (see KoreanSpeechRecognizer.listen()) --
-            // gives a late-arriving second fragment a bit more room to merge back in.
-            delay(2_500L)
+            // gives a late-arriving second fragment a bit more room to merge back in. Must stay
+            // comfortably longer than EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS (4.2s)
+            // plus restart/network overhead for the next fragment -- at the old 2.5s, a mid-
+            // utterance pause around ~2s could let this timer fire and dispatch the first
+            // fragment alone before the rest of the sentence even finished recognizing, and the
+            // late-arriving remainder would then get silently dropped by the "one utterance at a
+            // time" guard in sendRecognizedSpeech instead of merging.
+            delay(5_000L)
             val pending = pendingSpeechText?.trim().orEmpty()
             pendingSpeechText = null
             pendingSpeechJob = null

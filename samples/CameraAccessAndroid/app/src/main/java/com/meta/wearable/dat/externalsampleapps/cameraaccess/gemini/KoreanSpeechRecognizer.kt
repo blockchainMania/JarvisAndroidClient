@@ -19,7 +19,13 @@ class KoreanSpeechRecognizer(
 ) : SpeechInputController {
     companion object {
         private const val TAG = "KoreanSpeechRecognizer"
-        private const val RESTART_DELAY_MS = 250L
+        // The recognizer captures zero audio during this gap. Every restart mid-utterance
+        // (silence threshold trip, transient error) drops whatever the user says in this window
+        // entirely -- which is also why the very start of a fresh utterance is disproportionately
+        // likely to be misheard (it often lands right after a restart). Kept small but nonzero:
+        // 0ms risks ERROR_RECOGNIZER_BUSY from calling startListening before the previous
+        // session has fully torn down.
+        private const val RESTART_DELAY_MS = 50L
     }
 
     private val appContext = context.applicationContext
