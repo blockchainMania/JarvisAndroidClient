@@ -22,12 +22,14 @@ import kotlin.coroutines.resumeWithException
  * Gemini Live makes on its own). Kept separate from GeminiLiveService (the streaming audio
  * session) so the image+question round trip is a plain request/response with no ordering
  * dependency on session state -- see JARVIS_ROOT_AGENT_ARCHITECTURE_KO.md 3.3.
+ *
+ * Routed through the Jarvis backend's /agent/flash/generate proxy rather than calling Google
+ * directly -- the real Gemini API key never leaves the server, and every request/response is
+ * logged there so debugging doesn't require adb access to the phone. This class still owns the
+ * system prompt/schema/parsing; the backend is a schema-agnostic passthrough.
  */
 object GeminiFlashVisionClient {
     private const val TAG = "GeminiFlashVision"
-    private const val MODEL = "gemini-2.5-flash"
-    private const val ENDPOINT =
-        "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 
     data class VisionAnswer(val canRead: Boolean, val answer: String)
 
@@ -78,8 +80,7 @@ object GeminiFlashVisionClient {
         .build()
 
     suspend fun answerVisionQuestion(question: String, imageBase64: String): VisionAnswer? {
-        val apiKey = GeminiConfig.apiKey
-        if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY") return null
+        if (!GeminiConfig.isJarvisConfigured) return null
 
         val detailed = SAVE_INTENT_KEYWORDS.any { question.contains(it) }
         val body = JSONObject().apply {
@@ -109,14 +110,15 @@ object GeminiFlashVisionClient {
         }
 
         val request = Request.Builder()
-            .url("$ENDPOINT?key=$apiKey")
+            .url("${GeminiConfig.jarvisApiBase}/agent/flash/generate")
+            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
             .post(body.toString().toRequestBody(JSON))
             .build()
 
         val responseBody = try {
             executeSuspend(request)
         } catch (e: Exception) {
-            Log.e(TAG, "Gemini Flash request failed: ${e.message}")
+            Log.e(TAG, "Flash proxy request failed: ${e.message}")
             return null
         }
         return responseBody?.let { parseAnswer(it) }

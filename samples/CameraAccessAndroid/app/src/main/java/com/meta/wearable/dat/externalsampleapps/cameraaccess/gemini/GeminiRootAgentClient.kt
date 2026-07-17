@@ -24,12 +24,14 @@ import kotlin.coroutines.resumeWithException
  * append the call/response turns and call step() again, or stop on a text answer. Gemini
  * Live never makes this decision anymore -- it only speaks whatever text this produces.
  * See JARVIS_ROOT_AGENT_ARCHITECTURE_KO.md Phase 2.
+ *
+ * Routed through the Jarvis backend's /agent/flash/generate proxy rather than calling Google
+ * directly -- the real Gemini API key never leaves the server, and every decision step is
+ * logged there so debugging doesn't require adb access to the phone. This class still owns the
+ * tool declarations and drives the loop; the backend is a schema-agnostic passthrough.
  */
 object GeminiRootAgentClient {
     private const val TAG = "GeminiRootAgent"
-    private const val MODEL = "gemini-2.5-flash"
-    private const val ENDPOINT =
-        "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 
     data class FunctionCallStep(val name: String, val args: Map<String, Any?>)
     data class RootAgentStep(val functionCall: FunctionCallStep?, val text: String?)
@@ -53,8 +55,7 @@ object GeminiRootAgentClient {
     }
 
     suspend fun step(contents: JSONArray, systemInstruction: String): RootAgentStep? {
-        val apiKey = GeminiConfig.apiKey
-        if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY") return null
+        if (!GeminiConfig.isJarvisConfigured) return null
 
         val body = JSONObject().apply {
             put("systemInstruction", JSONObject().apply {
@@ -72,8 +73,7 @@ object GeminiRootAgentClient {
 
     /** One-shot: turn a raw tool result into a short spoken Korean answer. No tools involved. */
     suspend fun synthesizeAnswer(toolName: String, resultJson: String): String? {
-        val apiKey = GeminiConfig.apiKey
-        if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY") return null
+        if (!GeminiConfig.isJarvisConfigured) return null
 
         val prompt = "도구 \"$toolName\" 실행 결과: $resultJson\n\n" +
             "이 결과를 바탕으로 사용자에게 들려줄 짧고 자연스러운 한국어 구어체 답변 1~2문장만 쓰세요. " +
@@ -92,9 +92,9 @@ object GeminiRootAgentClient {
     }
 
     private suspend fun call(body: JSONObject): RootAgentStep? {
-        val apiKey = GeminiConfig.apiKey
         val request = Request.Builder()
-            .url("$ENDPOINT?key=$apiKey")
+            .url("${GeminiConfig.jarvisApiBase}/agent/flash/generate")
+            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
             .post(body.toString().toRequestBody(JSON))
             .build()
 
