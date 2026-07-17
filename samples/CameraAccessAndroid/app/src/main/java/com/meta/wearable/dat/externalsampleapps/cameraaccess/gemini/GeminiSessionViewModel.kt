@@ -32,6 +32,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
 
 data class GeminiUiState(
     val isGeminiActive: Boolean = false,
@@ -67,6 +68,7 @@ data class PendingToolConfirmation(
 data class CachedVisualRead(
     val answer: String,
     val capturedAtMs: Long,
+    val frame: VisualMemoryFrameStore.VisualFrame,
 )
 
 class GeminiSessionViewModel : ViewModel() {
@@ -523,32 +525,24 @@ class GeminiSessionViewModel : ViewModel() {
         val hasExplicitSaveIntent = SAVE_INTENT_KEYWORDS.any { text.contains(it) }
         val wantsFreshCapture = RECAPTURE_KEYWORDS.any { text.contains(it) }
 
-        val contents = JSONArray()
         val cached = cachedVisualRead
         if (
             hasExplicitSaveIntent && !wantsFreshCapture && cached != null &&
             System.currentTimeMillis() - cached.capturedAtMs <= VISUAL_READ_CACHE_TTL_MS
         ) {
-            // Replay the last read as if capture_current_view had just been called, so the
-            // model treats it as already-available context instead of re-triggering a photo.
-            Log.d(TAG, "Reusing cached visual read (${System.currentTimeMillis() - cached.capturedAtMs}ms old) for: $text")
-            contents.put(JSONObject().apply {
-                put("role", "model")
-                put("parts", JSONArray().put(JSONObject().put("functionCall", JSONObject().apply {
-                    put("name", "capture_current_view")
-                    put("args", JSONObject().put("reason", "이전에 읽은 내용 재사용"))
-                })))
-            })
-            contents.put(JSONObject().apply {
-                put("role", "user")
-                put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().apply {
-                    put("name", "capture_current_view")
-                    put("response", ToolResult.Success("[FINAL_ANSWER] ${cached.answer}").toJSON())
-                })))
-            })
-            // Single-use: avoid silently reusing the same read for an unrelated later save.
-            cachedVisualRead = null
+            // Save directly instead of routing back through the root agent: feeding the cached
+            // read back in as a replayed capture_current_view turn works (Gemini accepts it as
+            // long as a user turn precedes the functionCall turn), but in testing the model kept
+            // choosing to re-ask the confirm question as plain text instead of actually calling
+            // save_life_memory, even when explicitly told not to -- so there's nothing to skip
+            // the confirm gate FOR. Since the read is already on hand and the user has already
+            // asked to save it, there's no judgment call left to make here.
+            Log.d(TAG, "Explicit save intent + fresh cached read (${System.currentTimeMillis() - cached.capturedAtMs}ms old) -- saving directly: $text")
+            saveVisualReadDirectly(userNote = text, aiInterpretation = cached.answer)
+            return
         }
+
+        val contents = JSONArray()
         contents.put(JSONObject().apply {
             put("role", "user")
             put("parts", JSONArray().put(JSONObject().put("text", text)))
@@ -611,11 +605,48 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     private suspend fun dispatchRootAgentTool(name: String, args: Map<String, Any?>): ToolResult {
-        return if (name in ToolCallRouter.LOCAL_TOOL_NAMES) {
-            handleLocalToolCall(GeminiFunctionCall(id = "root-agent", name = name, args = args))
+        // Any save_life_memory dispatch -- whether the model decided to call it itself (e.g. a
+        // single "명함 인식하고 저장해줘" utterance) or the fast path below called it directly --
+        // reuses a still-fresh cached capture_current_view frame instead of letting OpenClawBridge
+        // trigger a second physical capturePhoto() on glasses just to attach an image it already
+        // has. Single-use: cleared once consumed so a later unrelated save can't reuse stale art.
+        val effectiveArgs = if (name == "save_life_memory") {
+            val cached = cachedVisualRead
+            if (cached != null && System.currentTimeMillis() - cached.capturedAtMs <= VISUAL_READ_CACHE_TTL_MS) {
+                cachedVisualRead = null
+                args + ("__preCapturedVisualFrame" to cached.frame)
+            } else {
+                args
+            }
         } else {
-            openClawBridge.dispatch(name, args)
+            args
         }
+        return if (name in ToolCallRouter.LOCAL_TOOL_NAMES) {
+            handleLocalToolCall(GeminiFunctionCall(id = "root-agent", name = name, args = effectiveArgs))
+        } else {
+            openClawBridge.dispatch(name, effectiveArgs)
+        }
+    }
+
+    /** Dispatches save_life_memory straight from a cached capture_current_view read -- see the
+     * cache-reuse branch in runRootAgent() for why this bypasses another root agent step. */
+    private suspend fun saveVisualReadDirectly(userNote: String, aiInterpretation: String) {
+        val args = mapOf(
+            "captured_at" to Instant.now().toString(),
+            "user_note" to userNote,
+            "ai_interpretation" to aiInterpretation,
+        )
+        val result = dispatchRootAgentTool("save_life_memory", args)
+        val spoken = try {
+            GeminiRootAgentClient.synthesizeAnswer("save_life_memory", result.toJSON().toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Synthesize after direct save failed: ${e.message}")
+            null
+        } ?: when (result) {
+            is ToolResult.Success -> "저장했습니다."
+            is ToolResult.Failure -> "저장하지 못했어요: ${result.error}"
+        }
+        geminiService.sendTextMessage(TTS_ONLY_PREFIX + spoken)
     }
 
     private fun confirmPendingToolCall() {
@@ -907,7 +938,11 @@ class GeminiSessionViewModel : ViewModel() {
             )
         }
 
-        cachedVisualRead = CachedVisualRead(answer = flashResult.answer, capturedAtMs = System.currentTimeMillis())
+        cachedVisualRead = CachedVisualRead(
+            answer = flashResult.answer,
+            capturedAtMs = System.currentTimeMillis(),
+            frame = visualFrame,
+        )
         return ToolResult.Success("[FINAL_ANSWER] ${flashResult.answer}")
     }
 

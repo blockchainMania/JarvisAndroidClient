@@ -151,7 +151,12 @@ class OpenClawBridge {
                             "source",
                         )
                         val capturedAtKst = nowKstIso()
-                        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
+                        // Callers that already captured a frame moments ago for a Flash read (see
+                        // GeminiSessionViewModel.saveVisualReadDirectly) can pass it here directly
+                        // instead of forcing another physical capturePhoto() -- on glasses that's a
+                        // real shutter + ~2s delay, which is exactly the double-capture this avoids.
+                        val visualFrame = args["__preCapturedVisualFrame"] as? VisualMemoryFrameStore.VisualFrame
+                            ?: VisualMemoryFrameStore.captureFreshVisual()
                             ?: return@withContext ToolResult.Failure(
                                 "No fresh camera image is available. Ask the user to hold still for a moment and try saving again."
                             )
