@@ -116,7 +116,41 @@ class ContactActionManager {
     }
 
     fun speechContextHint(limit: Int = 80): String {
-        if (!hasContactsPermission()) return ""
+        val names = recentContactNames(limit)
+        if (names.isEmpty()) return ""
+        return "연락처 이름 후보: ${names.joinToString(", ")}"
+    }
+
+    /**
+     * Short comma-separated name hint fed as an STT biasing prompt (e.g. Whisper's
+     * initial_prompt). Kept small and stripped of contact "# group / title" noise:
+     * a long or noisy prompt makes whisper.cpp's decode pathologically slow/stuck
+     * on-device, especially with Korean text (heavy tokenization overhead).
+     */
+    fun sttNameHint(limit: Int = 8, maxChars: Int = 60): String {
+        val names = recentContactNames(limit * 3) // over-fetch, then dedupe after cleanup
+            .map { cleanNameForSttHint(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(limit)
+        if (names.isEmpty()) return ""
+        val joined = names.joinToString(", ")
+        return if (joined.length <= maxChars) joined else joined.take(maxChars)
+    }
+
+    private fun cleanNameForSttHint(rawName: String): String {
+        val cleaned = rawName
+            .replace(Regex("#\\S*"), "")
+            .replace(Regex("\\([^)]*\\)"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        // Free-form contact entries ("# group name title") vary too much to reliably
+        // extract just the person's name, so cap length instead of guessing a word.
+        return cleaned.take(20)
+    }
+
+    private fun recentContactNames(limit: Int): List<String> {
+        if (!hasContactsPermission()) return emptyList()
         val names = linkedSetOf<String>()
         val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
         context.contentResolver.query(
@@ -134,8 +168,7 @@ class ContactActionManager {
                 }
             }
         }
-        if (names.isEmpty()) return ""
-        return "연락처 이름 후보: ${names.joinToString(", ")}"
+        return names.toList()
     }
 
     private fun hasContactsPermission(): Boolean =

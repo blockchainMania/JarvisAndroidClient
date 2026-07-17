@@ -38,12 +38,16 @@ Java_com_meta_wearable_dat_externalsampleapps_cameraaccess_whisper_WhisperNative
         jlong context_ptr,
         jint num_threads,
         jstring language_str,
+        jstring prompt_str,
         jfloatArray audio_data) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     if (context == NULL) return;
 
     const char *language_chars = (*env)->GetStringUTFChars(env, language_str, NULL);
+    const char *prompt_chars = prompt_str != NULL
+            ? (*env)->GetStringUTFChars(env, prompt_str, NULL)
+            : NULL;
     jfloat *audio_data_arr = (*env)->GetFloatArrayElements(env, audio_data, NULL);
     const jsize audio_data_length = (*env)->GetArrayLength(env, audio_data);
 
@@ -59,16 +63,22 @@ Java_com_meta_wearable_dat_externalsampleapps_cameraaccess_whisper_WhisperNative
     params.no_context = true;
     params.single_segment = true;
     params.suppress_blank = true;
+    // Biasing hint (e.g. recent contact names) so proper nouns are more likely
+    // to be transcribed correctly. Empty string is treated as "no hint".
+    params.initial_prompt = (prompt_chars != NULL && prompt_chars[0] != '\0') ? prompt_chars : NULL;
 
     whisper_reset_timings(context);
 
-    LOGI("Running whisper_full len=%d threads=%d language=%s", audio_data_length, num_threads, language_chars);
+    LOGI("Running whisper_full len=%d threads=%d language=%s prompt=%s", audio_data_length, num_threads, language_chars, params.initial_prompt ? params.initial_prompt : "(none)");
     if (whisper_full(context, params, audio_data_arr, audio_data_length) != 0) {
         LOGI("whisper_full failed");
     }
 
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio_data_arr, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, language_str, language_chars);
+    if (prompt_chars != NULL) {
+        (*env)->ReleaseStringUTFChars(env, prompt_str, prompt_chars);
+    }
 }
 
 JNIEXPORT jint JNICALL
