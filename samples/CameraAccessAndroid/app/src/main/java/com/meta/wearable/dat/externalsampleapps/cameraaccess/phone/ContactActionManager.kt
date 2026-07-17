@@ -102,7 +102,7 @@ class ContactActionManager {
                     JSONObject()
                         .put("rank", index + 1)
                         .put("display_name", match.displayName)
-                        .put("phone_number", maskPhoneNumber(match.phoneNumber))
+                        .put("phone_number", match.phoneNumber)
                 )
             }
         }
@@ -113,12 +113,6 @@ class ContactActionManager {
                 .put("candidates", candidates)
                 .toString()
         )
-    }
-
-    private fun maskPhoneNumber(value: String): String {
-        val digits = value.filter { it.isDigit() }
-        if (digits.length < 4) return value
-        return value.replace(Regex("\\d(?=\\d{4})"), "*")
     }
 
     fun speechContextHint(limit: Int = 80): String {
@@ -212,7 +206,8 @@ class ContactActionManager {
         }
 
         if (matches.isEmpty()) {
-            collectAllContacts()
+            val allContacts = collectAllContacts()
+            allContacts
                 .filter { contact ->
                     normalize(contact.displayName).contains(normalizedQuery) ||
                         normalizedQuery.contains(normalize(contact.displayName))
@@ -223,6 +218,21 @@ class ContactActionManager {
                         contact,
                     )
                 }
+            // Fall back to format-insensitive number matching (hyphens/spaces),
+            // so a number picked from search_contacts still resolves to a real contact.
+            if (matches.isEmpty() && numberQuery.length >= 4) {
+                allContacts
+                    .filter { contact ->
+                        val stored = normalizeNumber(contact.phoneNumber)
+                        stored.contains(numberQuery) || numberQuery.contains(stored)
+                    }
+                    .forEach { contact ->
+                        matches.putIfAbsent(
+                            "${contact.displayName}::${normalizeNumber(contact.phoneNumber)}",
+                            contact,
+                        )
+                    }
+            }
         }
 
         val exactNameMatches = matches.values.filter { normalize(it.displayName) == normalizedQuery }
