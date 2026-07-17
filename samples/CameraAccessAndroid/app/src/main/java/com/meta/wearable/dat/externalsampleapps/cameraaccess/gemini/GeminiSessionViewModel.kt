@@ -61,6 +61,14 @@ data class PendingToolConfirmation(
     val args: Map<String, Any?>,
 )
 
+// Short-lived cache of the last successful capture_current_view read (business card, document,
+// etc.), so a follow-up save-intent utterance ("저장해줘") doesn't have to re-trigger a whole new
+// photo capture just to re-derive text it already extracted a few seconds ago.
+data class CachedVisualRead(
+    val answer: String,
+    val capturedAtMs: Long,
+)
+
 class GeminiSessionViewModel : ViewModel() {
     companion object {
         private const val TAG = "GeminiSessionVM"
@@ -73,6 +81,20 @@ class GeminiSessionViewModel : ViewModel() {
         private val CONFIRM_REQUIRED_TOOLS = setOf(
             "save_person", "save_meeting", "save_memory", "save_life_memory", "save_need",
         )
+
+        // If the user's own utterance already carries explicit save intent ("저장해줘",
+        // "기억해줘"...), asking "이렇게 저장할까요?" again is a redundant round trip -- the
+        // request itself is the confirmation. The confirm gate stays in place for cases where
+        // the AI proposes a save the user didn't ask for (e.g. identify_person's no-match flow).
+        private val SAVE_INTENT_KEYWORDS = listOf("저장", "기억해", "등록", "기록")
+
+        // Present in the utterance, this means the user explicitly wants a fresh look (not a
+        // cached read reused), so cache reuse must be skipped even if a recent one exists.
+        private val RECAPTURE_KEYWORDS = listOf("다시")
+
+        // How long a cached capture_current_view read stays eligible for reuse by a later
+        // save-intent utterance before it's considered stale (the camera view may have changed).
+        private const val VISUAL_READ_CACHE_TTL_MS = 90_000L
 
         private const val ROOT_AGENT_SYSTEM_INSTRUCTION = """당신은 Jarvis 개인 비서의 판단 담당(루트 에이전트)입니다. 사용자 발화(음성 인식된 텍스트)를 보고 어떤 도구를 호출할지, 또는 도구 없이 바로 답할지 결정하세요. 당신의 텍스트 답변은 다른 컴포넌트가 그대로 소리 내어 읽으므로, 자연스러운 한국어 구어체로 짧게 쓰세요.
 
@@ -119,6 +141,7 @@ class GeminiSessionViewModel : ViewModel() {
     private var pendingSpeechJob: Job? = null
     private var usingFallbackAndroidStt: Boolean = false
     private var pendingToolConfirmation: PendingToolConfirmation? = null
+    private var cachedVisualRead: CachedVisualRead? = null
 
     private val _voiceCommands = MutableSharedFlow<MeetingVoiceCommand>(extraBufferCapacity = 4)
     val voiceCommands: SharedFlow<MeetingVoiceCommand> = _voiceCommands.asSharedFlow()
@@ -338,6 +361,7 @@ class GeminiSessionViewModel : ViewModel() {
         pendingSpeechText = null
         usingFallbackAndroidStt = false
         pendingToolConfirmation = null
+        cachedVisualRead = null
         _uiState.value = GeminiUiState()
     }
 
@@ -496,7 +520,36 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     private suspend fun runRootAgent(text: String) {
-        val contents = JSONArray().put(JSONObject().apply {
+        val hasExplicitSaveIntent = SAVE_INTENT_KEYWORDS.any { text.contains(it) }
+        val wantsFreshCapture = RECAPTURE_KEYWORDS.any { text.contains(it) }
+
+        val contents = JSONArray()
+        val cached = cachedVisualRead
+        if (
+            hasExplicitSaveIntent && !wantsFreshCapture && cached != null &&
+            System.currentTimeMillis() - cached.capturedAtMs <= VISUAL_READ_CACHE_TTL_MS
+        ) {
+            // Replay the last read as if capture_current_view had just been called, so the
+            // model treats it as already-available context instead of re-triggering a photo.
+            Log.d(TAG, "Reusing cached visual read (${System.currentTimeMillis() - cached.capturedAtMs}ms old) for: $text")
+            contents.put(JSONObject().apply {
+                put("role", "model")
+                put("parts", JSONArray().put(JSONObject().put("functionCall", JSONObject().apply {
+                    put("name", "capture_current_view")
+                    put("args", JSONObject().put("reason", "이전에 읽은 내용 재사용"))
+                })))
+            })
+            contents.put(JSONObject().apply {
+                put("role", "user")
+                put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().apply {
+                    put("name", "capture_current_view")
+                    put("response", ToolResult.Success("[FINAL_ANSWER] ${cached.answer}").toJSON())
+                })))
+            })
+            // Single-use: avoid silently reusing the same read for an unrelated later save.
+            cachedVisualRead = null
+        }
+        contents.put(JSONObject().apply {
             put("role", "user")
             put("parts", JSONArray().put(JSONObject().put("text", text)))
         })
@@ -528,7 +581,7 @@ class GeminiSessionViewModel : ViewModel() {
 
             Log.d(TAG, "Root agent step $stepIndex -> tool ${call.name}, args=${call.args}")
 
-            if (call.name in CONFIRM_REQUIRED_TOOLS) {
+            if (call.name in CONFIRM_REQUIRED_TOOLS && !hasExplicitSaveIntent) {
                 pendingToolConfirmation = PendingToolConfirmation(call.name, call.args)
                 val question = step.text?.takeIf { it.isNotBlank() } ?: "이 내용으로 저장할까요?"
                 geminiService.sendTextMessage(TTS_ONLY_PREFIX + question)
@@ -667,6 +720,7 @@ class GeminiSessionViewModel : ViewModel() {
             lastSentSpeechAt = 0L
             usingFallbackAndroidStt = false
             pendingToolConfirmation = null
+            cachedVisualRead = null
             _uiState.value = GeminiUiState()
             delay(1_200L)
             startSession(wakeWordInitiated = resumeWakeWordMode)
@@ -766,8 +820,12 @@ class GeminiSessionViewModel : ViewModel() {
 
     private fun isContactActionConfirm(text: String): Boolean {
         val normalized = text.replace(" ", "")
-        return listOf("응", "확인", "그래", "좋아", "진행", "실행", "보내", "보내줘", "전화해", "걸어", "걸어줘")
-            .any { normalized.contains(it) }
+        // Shared by pendingContactAction (call/text) and pendingToolConfirmation (save_* tools)
+        // -- covers both "응/전화해" style replies and "네/맞아/저장" style save confirmations.
+        return listOf(
+            "응", "네", "예", "확인", "그래", "맞아", "좋아", "진행", "실행",
+            "저장", "보내", "보내줘", "전화해", "걸어", "걸어줘",
+        ).any { normalized.contains(it) }
     }
 
     private fun isContactActionCancel(text: String): Boolean {
@@ -849,6 +907,7 @@ class GeminiSessionViewModel : ViewModel() {
             )
         }
 
+        cachedVisualRead = CachedVisualRead(answer = flashResult.answer, capturedAtMs = System.currentTimeMillis())
         return ToolResult.Success("[FINAL_ANSWER] ${flashResult.answer}")
     }
 
