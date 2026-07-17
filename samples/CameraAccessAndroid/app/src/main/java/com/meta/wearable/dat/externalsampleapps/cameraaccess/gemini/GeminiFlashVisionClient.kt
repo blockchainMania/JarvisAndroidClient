@@ -31,7 +31,19 @@ import kotlin.coroutines.resumeWithException
 object GeminiFlashVisionClient {
     private const val TAG = "GeminiFlashVision"
 
-    data class VisionAnswer(val canRead: Boolean, val answer: String)
+    data class VisionAnswer(val canRead: Boolean, val answer: String, val businessCard: BusinessCard? = null)
+
+    // Structured fields alongside the prose `answer`, so a save doesn't depend on the model
+    // (root agent or backend) correctly re-parsing "이름은 OO, 회사는 OO..." back out of a
+    // sentence -- that's exactly where fields other than name/company were getting lost.
+    data class BusinessCard(
+        val name: String,
+        val company: String,
+        val role: String?,
+        val phone: String?,
+        val email: String?,
+        val address: String?,
+    )
 
     // Detailed (field-by-field) answers are long enough that reading them aloud over Gemini
     // Live has tripped the WebSocket's ping/pong keepalive mid-sentence in testing. Only ask
@@ -51,7 +63,10 @@ object GeminiFlashVisionClient {
                 "회사 주소는 서울시 강남구 테헤란로 123입니다.\" 명함이 아닌 다른 문서/장면이면 이 6항목 형식에 " +
                 "얽매이지 말고 있는 정보를 항목별로 명확히 쓰세요. 이미지에서 실제로 보이지 않는 항목은 " +
                 "언급하지 말고 통째로 생략하세요 -- \"전화번호는 안 보여요\" 같은 문구도 넣지 말고 그냥 빼세요 " +
-                "(지어내지 마세요).\n"
+                "(지어내지 마세요).\n" +
+                "추가로, 이미지가 명함이면 business_card 객체도 함께 채우세요: name(이름), company(회사명), " +
+                "role(직책), phone(전화번호), email(이메일), address(회사주소). 실제로 보이지 않는 항목은 " +
+                "빈 문자열로 두세요(지어내지 마세요). 명함이 아니면 business_card는 아예 넣지 마세요.\n"
         } else {
             "answer에는 짧고 자연스러운 한국어 구어체로 1~2문장만 쓰세요. 명함이나 문서여도 무엇인지와 이름 " +
                 "정도만 간단히 언급하고, 모든 항목(주소·전화번호·이메일 등)을 나열하지 마세요. 사용자가 저장을 " +
@@ -68,6 +83,18 @@ object GeminiFlashVisionClient {
         put("properties", JSONObject().apply {
             put("can_read", JSONObject().put("type", "BOOLEAN"))
             put("answer", JSONObject().put("type", "STRING"))
+            put("business_card", JSONObject().apply {
+                put("type", "OBJECT")
+                put("nullable", true)
+                put("properties", JSONObject().apply {
+                    put("name", JSONObject().put("type", "STRING"))
+                    put("company", JSONObject().put("type", "STRING"))
+                    put("role", JSONObject().put("type", "STRING"))
+                    put("phone", JSONObject().put("type", "STRING"))
+                    put("email", JSONObject().put("type", "STRING"))
+                    put("address", JSONObject().put("type", "STRING"))
+                })
+            })
         })
         put("required", JSONArray().put("can_read").put("answer"))
     }
@@ -182,7 +209,23 @@ object GeminiFlashVisionClient {
             val structured = JSONObject(raw.substring(jsonStart, jsonEnd + 1))
             val answer = structured.optString("answer", "").trim()
             if (answer.isBlank()) return null
-            return VisionAnswer(canRead = structured.optBoolean("can_read", true), answer = answer)
+            val businessCard = structured.optJSONObject("business_card")?.let { card ->
+                val name = card.optString("name").trim()
+                val company = card.optString("company").trim()
+                if (name.isBlank() || company.isBlank()) {
+                    null
+                } else {
+                    BusinessCard(
+                        name = name,
+                        company = company,
+                        role = card.optString("role").trim().ifBlank { null },
+                        phone = card.optString("phone").trim().ifBlank { null },
+                        email = card.optString("email").trim().ifBlank { null },
+                        address = card.optString("address").trim().ifBlank { null },
+                    )
+                }
+            }
+            return VisionAnswer(canRead = structured.optBoolean("can_read", true), answer = answer, businessCard = businessCard)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse Gemini Flash response: ${e.message}, raw=${rawBody.take(500)}")
             return null
