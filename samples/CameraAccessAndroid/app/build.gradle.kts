@@ -10,6 +10,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.jetbrains.kotlin.android)
   alias(libs.plugins.compose.compiler)
+  id("com.google.gms.google-services")
 }
 
 android {
@@ -27,6 +28,14 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     vectorDrawables { useSupportLibrary = true }
+    ndk {
+      abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+    }
+    externalNativeBuild {
+      cmake {
+        arguments += listOf("-DANDROID_STL=c++_shared")
+      }
+    }
   }
 
   buildTypes {
@@ -43,7 +52,15 @@ android {
   kotlinOptions { jvmTarget = "1.8" }
   buildFeatures { compose = true }
   composeOptions { kotlinCompilerExtensionVersion = "1.5.1" }
-  packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+    }
+  }
+  packaging {
+    resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    jniLibs { pickFirsts += "**/libc++_shared.so" }
+  }
   signingConfigs {
     getByName("debug") {
       storeFile = file("sample.keystore")
@@ -57,6 +74,7 @@ android {
 dependencies {
   implementation(libs.androidx.activity.compose)
   implementation(platform(libs.androidx.compose.bom))
+  implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
   implementation(libs.androidx.exifinterface)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.viewmodel.compose)

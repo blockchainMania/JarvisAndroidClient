@@ -3,16 +3,14 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,7 +21,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -65,8 +62,9 @@ fun WebRTCOverlay(
         )
 
         // Room code pill (tap to copy)
-        if (uiState.roomCode.isNotEmpty()) {
-            RoomCodePill(code = uiState.roomCode)
+        if (uiState.viewerUrl.isNotEmpty()) {
+            ShareLinkPill(url = uiState.viewerUrl)
+            ShareLiveLinkButton(url = uiState.viewerUrl)
         }
 
         // Mic status
@@ -80,8 +78,8 @@ fun WebRTCOverlay(
 }
 
 @Composable
-fun RoomCodePill(
-    code: String,
+fun ShareLinkPill(
+    url: String,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -93,8 +91,9 @@ fun RoomCodePill(
             .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
             .clickable {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Room Code", code))
+                clipboard.setPrimaryClip(ClipData.newPlainText("Jarvis Live View", url))
                 showCopied = true
+                Toast.makeText(context, "Live link copied", Toast.LENGTH_SHORT).show()
                 scope.launch {
                     delay(1500)
                     showCopied = false
@@ -105,11 +104,32 @@ fun RoomCodePill(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = if (showCopied) "Copied" else code,
+            text = if (showCopied) "Copied" else "Live Link",
             color = if (showCopied) Color(0xFF4CAF50) else Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
         )
     }
+}
+
+@Composable
+fun ShareLiveLinkButton(url: String) {
+    val context = LocalContext.current
+    Text(
+        text = "Share",
+        color = Color.White,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .clickable {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, "Jarvis live view: $url")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(Intent.createChooser(intent, "Share live link"))
+            }
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    )
 }

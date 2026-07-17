@@ -14,9 +14,13 @@
 // video frame handling, photo capture, and error handling.
 //
 
+import CoreImage
+import CoreMedia
+import CoreVideo
 import MWDATCamera
 import MWDATCore
 import SwiftUI
+import VideoToolbox
 
 enum StreamingStatus {
   case streaming
@@ -75,6 +79,13 @@ class StreamSessionViewModel: ObservableObject {
   private var deviceMonitorTask: Task<Void, Never>?
   private var iPhoneCameraManager: IPhoneCameraManager?
 
+  // CPU-based CIContext for rendering decoded pixel buffers in background
+  private let cpuCIContext = CIContext(options: [.useSoftwareRenderer: true])
+  // VideoDecoder for decompressing HEVC/H.264 frames in background
+  private let videoDecoder = VideoDecoder()
+  private var backgroundFrameCount = 0
+  private var bgDiagLogged = false
+
   init(wearables: WearablesInterface) {
     self.wearables = wearables
     // Let the SDK auto-select from available devices
@@ -92,7 +103,30 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
+    setupVideoDecoder()
     attachListeners()
+  }
+
+  private func setupVideoDecoder() {
+    videoDecoder.setFrameCallback { [weak self] decodedFrame in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        let pixelBuffer = decodedFrame.pixelBuffer
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        if let cgImage = self.cpuCIContext.createCGImage(ciImage, from: rect) {
+          let image = UIImage(cgImage: cgImage)
+          self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
+          self.webrtcSessionVM?.pushVideoFrame(image)
+          if self.backgroundFrameCount <= 5 || self.backgroundFrameCount % 120 == 0 {
+            NSLog("[Stream] Background frame #%d decoded and forwarded (%dx%d)",
+                  self.backgroundFrameCount, width, height)
+          }
+        }
+      }
+    }
   }
 
   /// Recreate the StreamSession with the current selectedResolution.
@@ -118,19 +152,57 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     // Subscribe to video frames from the device camera
+    // This callback fires whether the app is in the foreground or background,
+    // enabling continuous streaming even when the screen is locked.
     videoFrameListenerToken = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
       Task { @MainActor [weak self] in
         guard let self else { return }
 
-        if let image = videoFrame.makeUIImage() {
-          self.currentVideoFrame = image
-          if !self.hasReceivedFirstFrame {
-            self.hasReceivedFirstFrame = true
+        let isInBackground = UIApplication.shared.applicationState == .background
+
+        if !isInBackground {
+          self.backgroundFrameCount = 0
+          self.bgDiagLogged = false
+          if let image = videoFrame.makeUIImage() {
+            self.currentVideoFrame = image
+            if !self.hasReceivedFirstFrame {
+              self.hasReceivedFirstFrame = true
+            }
+            self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
+            self.webrtcSessionVM?.pushVideoFrame(image)
           }
-          // Forward video frames to Gemini Live (throttled internally to ~1fps)
-          self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
-          // Forward video frames to WebRTC (no throttle — WebRTC handles bitrate)
-          self.webrtcSessionVM?.pushVideoFrame(image)
+        } else {
+          // In background: makeUIImage() uses VideoToolbox GPU rendering which iOS suspends.
+          // Instead, use our VideoDecoder (VTDecompressionSession) to decode compressed
+          // frames into pixel buffers, then convert via CPU CIContext.
+          self.backgroundFrameCount += 1
+
+          let sampleBuffer = videoFrame.sampleBuffer
+          let hasCompressedData = CMSampleBufferGetDataBuffer(sampleBuffer) != nil
+
+          if hasCompressedData {
+            // Compressed frame (HEVC/H.264) - decode via VTDecompressionSession
+            do {
+              try self.videoDecoder.decode(sampleBuffer)
+            } catch {
+              if self.backgroundFrameCount <= 5 || self.backgroundFrameCount % 120 == 0 {
+                NSLog("[Stream] Background frame #%d decode error: %@",
+                      self.backgroundFrameCount, String(describing: error))
+              }
+            }
+          } else if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            // Raw pixel buffer - convert directly via CPU CIContext
+            let width = CVPixelBufferGetWidth(pixelBuffer)
+            let height = CVPixelBufferGetHeight(pixelBuffer)
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            let rect = CGRect(x: 0, y: 0, width: width, height: height)
+            if let cgImage = self.cpuCIContext.createCGImage(ciImage, from: rect) {
+              let image = UIImage(cgImage: cgImage)
+              self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
+              self.webrtcSessionVM?.pushVideoFrame(image)
+            }
+            self.videoDecoder.invalidateSession()
+          }
         }
       }
     }

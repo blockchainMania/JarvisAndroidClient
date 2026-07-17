@@ -1,6 +1,23 @@
-# VisionClaw
+# JarvisAndroidClient
 
 ![VisionClaw](assets/teaserimage.png)
+
+## 자비스 OS Android 통합 브랜치
+
+이 브랜치는 Meta Ray-Ban 스마트 글라스 + Gemini Live + Jarvis Memory API를 연결한 자비스 OS 안드로이드 클라이언트 통합 버전입니다.
+
+현재 핵심 흐름:
+
+```text
+평상시: 음성만 Gemini Live로 대화
+시야가 필요한 질문: Gemini가 capture_current_view 호출 -> 최신 이미지 1장만 전송
+저장 요청: 이미지 해석 + 사용자 메모 -> save_life_memory -> Jarvis Memory API 저장
+검색 요청: search_memory/search_people/search_meetings -> Gemini가 자연어 답변
+```
+
+비용을 줄이기 위해 Gemini로 비디오를 계속 보내지 않습니다. Settings의 `Video Streaming`은 기본값이 꺼져 있으며, 현재 시야가 필요할 때만 최신 프레임 1장을 보냅니다.
+
+Android 실행/설정은 [samples/CameraAccessAndroid/README.md](samples/CameraAccessAndroid/README.md)를 참고하세요. Jarvis 서버 설정은 `blockchainMania/JarvisMemoryServer` 레포의 `jarvis-server/README.md`를 참고하세요.
 
 A real-time AI assistant for Meta Ray-Ban smart glasses. See what you see, hear what you say, and take actions on your behalf -- all through voice.
 
@@ -295,6 +312,25 @@ Gemini Live supports function calling. Both apps declare a single `execute` tool
 6. Result returns to Gemini via `toolResponse`
 7. Gemini speaks the confirmation
 
+### WebRTC Live Streaming
+
+Share your glasses POV in real-time to a browser viewer with bidirectional audio and video.
+
+1. Tap the **Live** button in the app
+2. The app connects to a signaling server and gets a 6-character room code
+3. Share the code -- the viewer opens the server URL in a browser and enters it
+4. WebRTC peer connection is established (SDP + ICE via the signaling server)
+5. Media flows peer-to-peer: glasses video to browser, browser camera back to iOS PiP
+
+**Key details:**
+- **Signaling server**: Node.js + WebSocket, located at `samples/CameraAccess/server/` -- serves the browser viewer and relays SDP/ICE
+- **NAT traversal**: Google STUN servers + ExpressTURN relay (fetched from `/api/turn`)
+- **Video**: 24 fps, 2.5 Mbps max bitrate
+- **Background handling**: 60-second grace period for iOS app backgrounding -- room stays alive for reconnection
+- **Constraint**: Cannot run simultaneously with Gemini Live (audio device conflict)
+
+For full details, see [`samples/CameraAccess/CameraAccess/WebRTC/README.md`](samples/CameraAccess/CameraAccess/WebRTC/README.md).
+
 ---
 
 ## Requirements
@@ -343,6 +379,19 @@ Gemini Live supports function calling. Both apps declare a single `execute` tool
 **Phone camera not starting** -- Ensure `CAMERA` permission is granted. CameraX requires both the permission and a valid lifecycle.
 
 For DAT SDK issues, see the [developer documentation](https://wearables.developer.meta.com/docs/develop/) or the [discussions forum](https://github.com/facebook/meta-wearables-dat-ios/discussions).
+
+## Citation
+
+If you use VisionClaw in your research, please cite our paper:
+
+```bibtex
+@article{liu2026visionclaw,
+  title={VisionClaw: Always-On AI Agents through Smart Glasses},
+  author={Liu, Xiaoan and Lee, DaeHo and Gonzalez, Eric J and Gonzalez-Franco, Mar and Suzuki, Ryo},
+  journal={arXiv preprint arXiv:2604.03486},
+  year={2026}
+}
+```
 
 ## License
 
