@@ -256,7 +256,17 @@ class OpenClawBridge {
         return if (statusCode in 200..299) {
             ToolResult.Success(responseBody)
         } else {
-            ToolResult.Failure("HTTP $statusCode: ${responseBody.take(200)}")
+            // The backend's validation errors (FastAPI's {"detail": "..."}) are already clean,
+            // specific, correctly-worded Korean guidance (e.g. "얼굴이 잘 안 보여요. 정면으로
+            // 다시 비춰주시겠어요?") -- pass that straight through instead of the raw
+            // "HTTP 422: {...}" wrapper, so the root agent doesn't have to parse it out of a
+            // technical string on its own to relay it faithfully to the user.
+            val detail = try {
+                JSONObject(responseBody).optString("detail").takeIf { it.isNotBlank() }
+            } catch (e: Exception) {
+                null
+            }
+            ToolResult.Failure(detail ?: "HTTP $statusCode: ${responseBody.take(200)}")
         }
     }
 
