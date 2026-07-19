@@ -245,9 +245,10 @@ object ToolDeclarations {
 
     private fun callContact() = decl(
         name = "call_contact",
-        description = "사용자의 Android 전화번호부에서 연락처를 찾아 즉시 전화를 겁니다. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 대상자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
+        description = "전화를 겁니다. universal_search 결과의 사람(person/person_candidates)에 phone이 있으면 그 번호를 phone_number에 그대로 넣어 바로 거세요 -- Android 전화번호부에 그 사람이 등록되어 있지 않아도 걸 수 있습니다. phone이 없으면 query로 Android 전화번호부에서 이름/번호를 찾아 겁니다. 반드시 사용자가 대상자를 확정한 뒤 호출하고, 여러 명이면 호출하지 말고 다시 확인하세요.",
         properties = JSONObject()
-            .put("query", strProp("연락처 이름 또는 전화번호 일부")),
+            .put("query", strProp("사람 이름. phone_number를 알고 있어도 확인 메시지에 쓰이니 이름은 항상 넣으세요. 이름조차 모르면 전화번호 일부"))
+            .put("phone_number", strProp("universal_search로 이미 알아낸 정확한 전화번호 (알고 있으면 이걸 우선 사용)")),
         required = listOf("query"),
     )
 
@@ -262,9 +263,10 @@ object ToolDeclarations {
 
     private fun textContact() = decl(
         name = "text_contact",
-        description = "사용자의 Android 전화번호부에서 연락처를 찾아 SMS 문자를 즉시 전송합니다. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 수신자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
+        description = "SMS 문자를 보냅니다. universal_search 결과의 사람(person/person_candidates)에 phone이 있으면 그 번호를 phone_number에 그대로 넣어 바로 보내세요 -- Android 전화번호부에 그 사람이 등록되어 있지 않아도 보낼 수 있습니다. phone이 없으면 query로 Android 전화번호부에서 이름/번호를 찾아 보냅니다. 반드시 사용자가 수신자를 확정한 뒤 호출하고, 여러 명이면 호출하지 말고 다시 확인하세요.",
         properties = JSONObject()
-            .put("query", strProp("연락처 이름 또는 전화번호 일부"))
+            .put("query", strProp("사람 이름. phone_number를 알고 있어도 확인 메시지에 쓰이니 이름은 항상 넣으세요. 이름조차 모르면 전화번호 일부"))
+            .put("phone_number", strProp("universal_search로 이미 알아낸 정확한 전화번호 (알고 있으면 이걸 우선 사용)"))
             .put("message", strProp("보낼 문자 초안")),
         required = listOf("query", "message"),
     )

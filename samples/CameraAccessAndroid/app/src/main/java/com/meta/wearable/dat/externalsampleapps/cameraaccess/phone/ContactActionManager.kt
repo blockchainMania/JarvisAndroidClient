@@ -18,6 +18,35 @@ class ContactActionManager {
     private val context
         get() = AppContextProvider.require()
 
+    /** Dials a phone number directly, no contact-book lookup -- for when the caller already
+     * has an exact number (e.g. from a Jarvis-saved person's `phone` field via universal_search)
+     * rather than a name to resolve. See ToolDeclarations.callContact's `phone_number` param. */
+    fun callNumber(phoneNumber: String, displayName: String?): ToolResult {
+        if (!hasCallPermission()) {
+            return ToolResult.Failure("전화 발신 권한이 없습니다. 전화 권한을 허용한 뒤 다시 시도해주세요.")
+        }
+        if (phoneNumber.isBlank()) {
+            return ToolResult.Failure("전화번호가 비어 있습니다.")
+        }
+        launchCallIntent(phoneNumber)
+        return ToolResult.Success("${displayName?.takeIf { it.isNotBlank() } ?: phoneNumber}에게 전화를 걸었습니다.")
+    }
+
+    /** Text-message equivalent of callNumber() -- see its doc comment. */
+    fun textNumber(phoneNumber: String, message: String, displayName: String?): ToolResult {
+        if (!hasSmsPermission()) {
+            return ToolResult.Failure("문자 전송 권한이 없습니다. SMS 권한을 허용한 뒤 다시 시도해주세요.")
+        }
+        if (phoneNumber.isBlank()) {
+            return ToolResult.Failure("전화번호가 비어 있습니다.")
+        }
+        if (message.isBlank()) {
+            return ToolResult.Failure("보낼 문자 내용을 함께 알려주세요.")
+        }
+        sendSms(phoneNumber, message)
+        return ToolResult.Success("${displayName?.takeIf { it.isNotBlank() } ?: phoneNumber}에게 문자를 보냈습니다.")
+    }
+
     fun callContact(query: String): ToolResult {
         if (!hasContactsPermission()) {
             return ToolResult.Failure("전화번호부 권한이 없습니다. 연락처 권한을 허용한 뒤 다시 시도해주세요.")

@@ -55,6 +55,10 @@ data class PendingContactAction(
     val type: PendingContactActionType,
     val query: String,
     val message: String? = null,
+    // Set when the root agent already resolved an exact number (e.g. a Jarvis-saved person's
+    // `phone` field via universal_search) -- lets confirmPendingContactAction dial/text it
+    // directly instead of re-resolving through Android's contacts book by name.
+    val phoneNumber: String? = null,
 )
 
 data class PendingToolConfirmation(
@@ -132,7 +136,7 @@ class GeminiSessionViewModel : ViewModel() {
 - 도구 없이 이미 아는 사실로 답할 수 있으면 도구를 호출하지 말고 바로 텍스트로 답하세요.
 - 과거 기억/사람/미팅/니즈 관련 질문은 항상 universal_search를 우선 사용하세요.
 - 현재 시야(카메라)가 필요한 질문이나 저장 요청이면 capture_current_view를 먼저 호출하세요. 그 결과는 이미 완성된 판독 텍스트입니다 -- 다시 캡처를 요청하지 말고 그 내용을 근거로 다음 행동을 결정하세요. 단, **사람을 저장/등록하는 요청(아래 참고)에는 이 규칙을 적용하지 마세요** -- capture_current_view는 명함/문서/사물을 "읽는" 용도이고 사람 얼굴 품질 판정에는 안 맞습니다.
-- 전화/문자 요청은 먼저 universal_search로 사람 후보를 찾고, 없으면 search_contacts로 Android 연락처 후보를 찾아 사용자가 대상을 확정한 뒤에만 call_contact/text_contact를 호출하세요. 후보가 여럿이면 도구를 호출하지 말고 텍스트로 후보를 제시해 확인을 구하세요.
+- 전화/문자 요청은 먼저 universal_search로 사람 후보를 찾으세요. 찾은 사람(person/person_candidates)에 phone이 있으면 call_contact/text_contact의 phone_number에 그 번호를 그대로 넣어 호출하세요 -- Android 전화번호부에 없는 사람도 이렇게 걸고 보낼 수 있습니다. phone이 없으면 search_contacts로 Android 연락처 후보를 찾아 query로 호출하세요. 어느 경우든 사용자가 대상을 확정한 뒤에만 호출하고, 후보가 여럿이면 도구를 호출하지 말고 텍스트로 후보를 제시해 확인을 구하세요.
 - save_person, save_meeting, save_memory, save_life_memory, save_need를 호출하기로 결정했으면, 반드시 같은 응답에 텍스트로 "이 내용으로 저장할까요?" 같은 확인 질문도 함께 포함하세요. 이 확인 질문을 사용자가 승인한 뒤에만 실제로 저장이 실행됩니다.
 - 명함을 저장할 때 확인 질문은 이름/회사명/직책/전화번호/이메일주소/회사주소 중 실제로 확인된 항목만 나열해서 물으세요. 예: "이름은 김민수 팀장, 회사는 ABC상사, 전화번호는 010-1234-5678로 인식했어요. 이렇게 저장해드릴까요?" 확인 안 된 항목은 언급하지 말고("전화번호는 없음" 같은 말 하지 말고) 그냥 빼세요.
 - 사용자가 "이 사람 누구야?", "얘 이름 뭐였지?"처럼 지금 보이는 사람이 누구인지 물으면 identify_person을 호출하세요(얼굴로 찾는 것이므로 capture_current_view가 아니라 identify_person을 씁니다). 일치하는 사람이 없다고 나오면 처음 뵙는 분 같다고 말하고 이름을 물어본 뒤, 이름을 들으면 save_person(name, attach_current_photo=true)으로 등록을 제안하세요.
@@ -973,21 +977,25 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun callContact(call: GeminiFunctionCall): ToolResult {
         val query = call.args["query"]?.toString()?.trim().orEmpty()
-        if (query.isBlank()) {
+        val phoneNumber = call.args["phone_number"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
+        if (query.isBlank() && phoneNumber == null) {
             return ToolResult.Failure("전화할 연락처 이름을 알려주세요.")
         }
         val action = PendingContactAction(
             type = PendingContactActionType.CALL,
             query = query,
+            phoneNumber = phoneNumber,
         )
         setPendingContactAction(action)
-        return ToolResult.Success("${query}에게 전화하기 전 사용자 확인을 기다리고 있습니다. 앱 화면에서 실행을 누르거나 '응, 전화해'라고 말하면 실행됩니다.")
+        val target = query.ifBlank { phoneNumber.orEmpty() }
+        return ToolResult.Success("${target}에게 전화하기 전 사용자 확인을 기다리고 있습니다. 앱 화면에서 실행을 누르거나 '응, 전화해'라고 말하면 실행됩니다.")
     }
 
     private suspend fun textContact(call: GeminiFunctionCall): ToolResult {
         val query = call.args["query"]?.toString()?.trim().orEmpty()
+        val phoneNumber = call.args["phone_number"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
         val message = call.args["message"]?.toString()?.trim().orEmpty()
-        if (query.isBlank()) {
+        if (query.isBlank() && phoneNumber == null) {
             return ToolResult.Failure("문자를 보낼 연락처 이름을 알려주세요.")
         }
         if (message.isBlank()) {
@@ -997,29 +1005,42 @@ class GeminiSessionViewModel : ViewModel() {
             type = PendingContactActionType.TEXT,
             query = query,
             message = message,
+            phoneNumber = phoneNumber,
         )
         setPendingContactAction(action)
-        return ToolResult.Success("${query}에게 문자 보내기 전 사용자 확인을 기다리고 있습니다. 앱 화면에서 실행을 누르거나 '응, 보내'라고 말하면 실행됩니다.")
+        val target = query.ifBlank { phoneNumber.orEmpty() }
+        return ToolResult.Success("${target}에게 문자 보내기 전 사용자 확인을 기다리고 있습니다. 앱 화면에서 실행을 누르거나 '응, 보내'라고 말하면 실행됩니다.")
     }
 
     private fun setPendingContactAction(action: PendingContactAction) {
+        val target = action.query.ifBlank { action.phoneNumber.orEmpty() }
         _uiState.value = _uiState.value.copy(
             pendingContactAction = action,
             aiTranscript = when (action.type) {
-                PendingContactActionType.CALL -> "${action.query}에게 전화할까요?"
-                PendingContactActionType.TEXT -> "${action.query}에게 아래 문자 내용을 보낼까요?\n${action.message.orEmpty()}"
+                PendingContactActionType.CALL -> "${target}에게 전화할까요?"
+                PendingContactActionType.TEXT -> "${target}에게 아래 문자 내용을 보낼까요?\n${action.message.orEmpty()}"
             },
         )
     }
 
     fun confirmPendingContactAction() {
         val action = _uiState.value.pendingContactAction ?: return
-        val result = when (action.type) {
-            PendingContactActionType.CALL -> contactActionManager.callContact(action.query)
-            PendingContactActionType.TEXT -> contactActionManager.textContact(
-                query = action.query,
-                message = action.message.orEmpty(),
-            )
+        val phoneNumber = action.phoneNumber
+        val result = if (phoneNumber != null) {
+            when (action.type) {
+                PendingContactActionType.CALL ->
+                    contactActionManager.callNumber(phoneNumber, action.query.takeIf { it.isNotBlank() })
+                PendingContactActionType.TEXT ->
+                    contactActionManager.textNumber(phoneNumber, action.message.orEmpty(), action.query.takeIf { it.isNotBlank() })
+            }
+        } else {
+            when (action.type) {
+                PendingContactActionType.CALL -> contactActionManager.callContact(action.query)
+                PendingContactActionType.TEXT -> contactActionManager.textContact(
+                    query = action.query,
+                    message = action.message.orEmpty(),
+                )
+            }
         }
         _uiState.value = _uiState.value.copy(
             pendingContactAction = null,
