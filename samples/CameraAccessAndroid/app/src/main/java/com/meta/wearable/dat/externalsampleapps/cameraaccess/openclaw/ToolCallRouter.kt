@@ -28,6 +28,7 @@ class ToolCallRouter(
             "search_contacts",
             "call_contact",
             "text_contact",
+            "send_email",
             "create_contact",
             "create_calendar_event",
         )

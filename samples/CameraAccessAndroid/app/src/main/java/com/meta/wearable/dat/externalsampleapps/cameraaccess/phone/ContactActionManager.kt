@@ -92,6 +92,34 @@ class ContactActionManager {
         return ToolResult.Success("${match.displayName}에게 문자를 보냈습니다.")
     }
 
+    /**
+     * Opens the user's mail app with a draft pre-filled (recipient/subject/body) via
+     * ACTION_SENDTO -- same "open native UI, user finalizes" pattern as createContact(). There's
+     * no SMTP/OAuth credential wired up anywhere in this app to send mail silently server-side,
+     * and a compose-and-confirm flow is the safer default for something as hard to undo as an
+     * email anyway.
+     */
+    fun sendEmail(to: String, subject: String?, body: String): ToolResult {
+        if (to.isBlank()) {
+            return ToolResult.Failure("받는 사람 이메일 주소를 알려주세요.")
+        }
+        if (body.isBlank()) {
+            return ToolResult.Failure("메일 내용을 알려주세요.")
+        }
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:")
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+            subject?.takeIf { it.isNotBlank() }?.let { putExtra(Intent.EXTRA_SUBJECT, it) }
+            putExtra(Intent.EXTRA_TEXT, body)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (intent.resolveActivity(context.packageManager) == null) {
+            return ToolResult.Failure("메일 앱을 찾을 수 없습니다.")
+        }
+        context.startActivity(intent)
+        return ToolResult.Success("${to}에게 보낼 메일 작성 화면을 열었습니다. 내용을 확인한 뒤 전송해주세요.")
+    }
+
     fun createContact(
         name: String,
         phone: String?,

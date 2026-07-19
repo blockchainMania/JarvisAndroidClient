@@ -98,6 +98,7 @@ private fun String.userFacingToolLabel(): String = when (this) {
     "call_contact" -> "전화 연결"
     "text_contact" -> "문자 전송"
     "create_contact" -> "연락처 등록"
+    "send_email" -> "메일 작성"
     "create_calendar_event" -> "일정 등록"
     "save_meeting" -> "회의 저장"
     "save_person" -> "사람 저장"
@@ -126,6 +127,7 @@ object ToolDeclarations {
         .put(searchContacts())
         .put(callContact())
         .put(textContact())
+        .put(sendEmail())
         .put(createContact())
         .put(createCalendarEvent())
         .put(savePerson())
@@ -269,6 +271,16 @@ object ToolDeclarations {
             .put("phone_number", strProp("universal_search로 이미 알아낸 정확한 전화번호 (알고 있으면 이걸 우선 사용)"))
             .put("message", strProp("보낼 문자 초안")),
         required = listOf("query", "message"),
+    )
+
+    private fun sendEmail() = decl(
+        name = "send_email",
+        description = "사람에게 메일을 보낼 준비를 합니다. universal_search 결과의 사람(person/person_candidates)에 email이 있으면 그 주소를 to에 넣으세요. 앱이 받는사람/제목/본문이 채워진 메일 작성 화면을 열고, 사용자가 내용을 확인한 뒤 직접 전송 버튼을 눌러야 실제로 발송됩니다(자동 발송 아님) -- 이 도구를 호출하기 전에 반드시 사용자에게 본문 내용을 확인받으세요.",
+        properties = JSONObject()
+            .put("to", strProp("받는 사람 이메일 주소"))
+            .put("subject", strProp("메일 제목 (선택)"))
+            .put("body", strProp("메일 본문")),
+        required = listOf("to", "body"),
     )
 
     private fun createContact() = decl(
