@@ -198,11 +198,7 @@ class GeminiSessionViewModel : ViewModel() {
         commandSpeechRecognizer?.stop()
         commandSpeechRecognizer = createSpeechInputController()
         _uiState.value = _uiState.value.copy(
-            userTranscript = if (SettingsManager.speechRecognizerProvider == "whisper") {
-                "STT: Whisper.cpp"
-            } else {
-                "STT: Android ko-KR"
-            },
+            userTranscript = "",
             aiTranscript = "",
         )
 
@@ -428,14 +424,15 @@ class GeminiSessionViewModel : ViewModel() {
         pendingSpeechJob = viewModelScope.launch {
             // Secondary safety net for when KoreanSpeechRecognizer still splits an utterance
             // despite its own extended silence thresholds (see KoreanSpeechRecognizer.listen()) --
-            // gives a late-arriving second fragment a bit more room to merge back in. Must stay
-            // comfortably longer than EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS (4.2s)
-            // plus restart/network overhead for the next fragment -- at the old 2.5s, a mid-
-            // utterance pause around ~2s could let this timer fire and dispatch the first
-            // fragment alone before the rest of the sentence even finished recognizing, and the
-            // late-arriving remainder would then get silently dropped by the "one utterance at a
-            // time" guard in sendRecognizedSpeech instead of merging.
-            delay(5_000L)
+            // gives a late-arriving second fragment a bit more room to merge back in. This is
+            // a deliberate speed/safety trade-off, not a full fix: catching every possible
+            // fragmentation would need this to exceed EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS
+            // (4.2s) *plus* however long the next fragment takes to speak, but that made every
+            // single utterance (fragmented or not) feel like a ~5s hang before anything happened.
+            // 2s covers the originally-reported ~2s mid-sentence pause while keeping the common
+            // (non-fragmented) case responsive. If long pauses start dropping tails again, this
+            // is the first knob to revisit.
+            delay(2_000L)
             val pending = pendingSpeechText?.trim().orEmpty()
             pendingSpeechText = null
             pendingSpeechJob = null

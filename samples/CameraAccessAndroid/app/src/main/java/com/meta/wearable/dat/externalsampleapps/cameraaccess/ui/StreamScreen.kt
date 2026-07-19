@@ -68,7 +68,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meta.wearable.dat.camera.types.StreamSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.PendingContactAction
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.PendingContactActionType
@@ -262,11 +261,15 @@ fun StreamScreen(
         meetingRecordingUiState.isRecording -> "회의 발언을 기록 중입니다. 끝낼 때는 \"회의 녹음 종료\"라고 말하거나 버튼을 누르세요."
         meetingRecordingUiState.isProcessing -> "녹음 내용을 텍스트와 회의록으로 정리하고 있습니다."
         geminiUiState.toolCallStatus is ToolCallStatus.Executing -> geminiUiState.toolCallStatus.displayText
-        geminiUiState.isGeminiActive -> "말씀하세요. 현재 시야 질문, 기억 저장, 검색, 전화/문자를 처리할 수 있습니다."
+        geminiUiState.isGeminiActive -> "편하게 말씀해보세요! 눈앞에 보이는 거 물어보기, 기억해두거나 찾아보기, 전화나 문자 부탁도 다 돼요."
         streamUiState.capturedPhoto != null -> "최근 캡처 이미지를 기준으로 답변했습니다. 다시 질문하면 새로 캡처합니다."
         streamUiState.streamSessionState == StreamSessionState.STREAMING -> "자비스라고 부르거나 AI 버튼을 누르면 질문을 듣습니다."
         else -> "글라스 또는 폰 카메라를 연결하면 Jarvis가 현재 시야를 사용할 수 있습니다."
     }
+    // AI/회의 status used to have their own chips here too, but that info is already shown by
+    // the AI/회의 buttons in ControlsRow below (color + label) -- same state, shown twice.
+    // Kept only the two chips that have no bottom-button equivalent (camera/glasses connection,
+    // Jarvis backend connection).
     val statusChips = listOf(
         StatusChipInfo(
             label = when {
@@ -283,21 +286,6 @@ fun StreamScreen(
             },
         ),
         StatusChipInfo(
-            label = when {
-                geminiUiState.isGeminiActive &&
-                    geminiUiState.connectionState == GeminiConnectionState.Ready -> "AI 듣는 중"
-                geminiUiState.isGeminiActive -> "AI 연결 중"
-                else -> "AI 대기"
-            },
-            color = when {
-                geminiUiState.connectionState is GeminiConnectionState.Error -> AppColor.Red
-                geminiUiState.isGeminiActive &&
-                    geminiUiState.connectionState == GeminiConnectionState.Ready -> AppColor.Green
-                geminiUiState.isGeminiActive -> Color(0xFFE7A400)
-                else -> Color(0xFF8A97A8)
-            },
-        ),
-        StatusChipInfo(
             label = when (geminiUiState.openClawConnectionState) {
                 OpenClawConnectionState.Connected -> "Jarvis 서버 연결됨"
                 OpenClawConnectionState.Checking -> "서버 확인 중"
@@ -309,18 +297,6 @@ fun StreamScreen(
                 OpenClawConnectionState.Checking -> Color(0xFFE7A400)
                 is OpenClawConnectionState.Unreachable -> AppColor.Red
                 OpenClawConnectionState.NotConfigured -> Color(0xFF8A97A8)
-            },
-        ),
-        StatusChipInfo(
-            label = when {
-                meetingRecordingUiState.isRecording -> "회의 녹음 중"
-                meetingRecordingUiState.isProcessing -> "회의록 정리 중"
-                else -> "회의 대기"
-            },
-            color = when {
-                meetingRecordingUiState.isRecording -> AppColor.Red
-                meetingRecordingUiState.isProcessing -> Color(0xFFE7A400)
-                else -> Color(0xFF8A97A8)
             },
         ),
     )
