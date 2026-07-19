@@ -99,6 +99,13 @@ class GeminiSessionViewModel : ViewModel() {
         // the AI proposes a save the user didn't ask for (e.g. identify_person's no-match flow).
         private val SAVE_INTENT_KEYWORDS = listOf("저장", "기억해", "등록", "기록")
 
+        // "내 앞에 있는 아이/사람"처럼 지극히 자연스러운 person-reference 표현도
+        // VisionQuestionDetector의 "앞에있는" 키워드와 겹친다. 그 경우 save_person/
+        // identify_person을 아는 루트 에이전트가 아니라 문서/사물 판독용 GeminiFlashVisionClient로
+        // 새서 얼굴 저장/조회가 통째로 우회되는 게 실제로 확인된 버그다 -- 저장/조회 의도가 있으면
+        // VisionQuestionDetector 단축 경로를 절대 타면 안 된다.
+        private val IDENTIFY_INTENT_KEYWORDS = listOf("누구야", "누구게", "누구지", "누구니")
+
         // Present in the utterance, this means the user explicitly wants a fresh look (not a
         // cached read reused), so cache reuse must be skipped even if a recent one exists.
         private val RECAPTURE_KEYWORDS = listOf("다시")
@@ -522,7 +529,17 @@ class GeminiSessionViewModel : ViewModel() {
      * second judge. See JARVIS_ROOT_AGENT_ARCHITECTURE_KO.md Phase 1.
      */
     private suspend fun sendTextOrVisionAnswer(text: String) {
-        if (!VisionQuestionDetector.matches(text)) {
+        // Save-intent ("저장해줘"/"기억해줘"...) or identify-intent ("누구야"...) utterances must
+        // go through the root agent even if they also match VisionQuestionDetector's keywords --
+        // "내 앞에 있는 아이를 도현이라고 저장해줘" contains "앞에있는" just like a plain "what's
+        // this" question does, but only the root agent knows about save_person/identify_person.
+        // Short-circuiting straight to GeminiFlashVisionClient here meant person-save/identify
+        // requests silently got treated as generic document/object questions instead -- face
+        // recognition never even got invoked, which is exactly the reported "얼굴인식이 1도
+        // 구현이 안됨" symptom.
+        val hasPersonIntent = SAVE_INTENT_KEYWORDS.any { text.contains(it) } ||
+            IDENTIFY_INTENT_KEYWORDS.any { text.contains(it) }
+        if (!VisionQuestionDetector.matches(text) || hasPersonIntent) {
             runRootAgent(text)
             return
         }
@@ -555,6 +572,15 @@ class GeminiSessionViewModel : ViewModel() {
             return
         }
         Log.d(TAG, "Gemini Flash canRead=${result.canRead}")
+        // Same reasoning as captureCurrentView()'s cache: a save-intent follow-up right after
+        // ("도현이라고 저장해줘") should reuse this read instead of forcing a brand new capture --
+        // by then the subject may well have moved out of frame, as happened in testing.
+        cachedVisualRead = CachedVisualRead(
+            answer = result.answer,
+            capturedAtMs = System.currentTimeMillis(),
+            frame = visualFrame,
+            businessCard = result.businessCard,
+        )
         speakAndRemember(text, result.answer)
     }
 
