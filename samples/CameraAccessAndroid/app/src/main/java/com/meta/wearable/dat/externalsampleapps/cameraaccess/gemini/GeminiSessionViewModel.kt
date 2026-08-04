@@ -184,6 +184,14 @@ class GeminiSessionViewModel : ViewModel() {
     private var usingFallbackAndroidStt: Boolean = false
     private var pendingToolConfirmation: PendingToolConfirmation? = null
     private var cachedVisualRead: CachedVisualRead? = null
+    // True whenever the answer just spoken is itself a question back to the user (a save
+    // confirmation, a disambiguation like "어떤 김윤섭인가요?", or a re-ask after an empty/failed
+    // result) -- set in speakAndRemember from whether that answer text ends in "?". Wake-word
+    // sessions auto-stop ~250ms after TTS finishes speaking (see onTurnComplete below); without
+    // this guard that teardown clears conversationHistory before the user can even reply, so
+    // their answer arrives as a brand new utterance with zero memory of what was asked --
+    // producing exactly the "keeps asking questions back and never answers" loop this guards.
+    private var expectingReply: Boolean = false
     private val conversationHistory = ArrayDeque<ConversationTurn>()
 
     private val _voiceCommands = MutableSharedFlow<MeetingVoiceCommand>(extraBufferCapacity = 4)
@@ -234,7 +242,8 @@ class GeminiSessionViewModel : ViewModel() {
                     if (
                         _uiState.value.isGeminiActive &&
                         wakeWordSessionActive &&
-                        _uiState.value.pendingContactAction == null
+                        _uiState.value.pendingContactAction == null &&
+                        !expectingReply
                     ) {
                         stopSession()
                     }
@@ -421,6 +430,7 @@ class GeminiSessionViewModel : ViewModel() {
         pendingSpeechText = null
         usingFallbackAndroidStt = false
         pendingToolConfirmation = null
+        expectingReply = false
         cachedVisualRead = null
         conversationHistory.clear()
         isProcessingUtterance = false
@@ -634,6 +644,7 @@ class GeminiSessionViewModel : ViewModel() {
     /** Sends the final spoken answer for this turn and records it as conversational history in
      * one place, so no call site can send an answer without also remembering it. */
     private fun speakAndRemember(userText: String, answer: String) {
+        expectingReply = answer.trim().endsWith("?")
         geminiService.sendTextMessage(TTS_ONLY_PREFIX + answer)
         rememberConversationTurn(userText, answer)
     }
@@ -708,6 +719,7 @@ class GeminiSessionViewModel : ViewModel() {
             if (step == null) {
                 // Root agent unreachable/unparseable. Live has no tools or rich prompt of its
                 // own anymore, so there's nothing useful to hand it -- apologize instead.
+                expectingReply = true
                 geminiService.sendTextMessage(
                     TTS_ONLY_PREFIX + "지금 요청을 처리하는 데 문제가 있었어요. 다시 한번 말씀해주시겠어요?"
                 )
@@ -718,6 +730,7 @@ class GeminiSessionViewModel : ViewModel() {
             if (call == null) {
                 val answer = step.text
                 if (answer.isNullOrBlank()) {
+                    expectingReply = true
                     geminiService.sendTextMessage(
                         TTS_ONLY_PREFIX + "죄송해요, 답을 잘 못 만들었어요. 다시 한번 말씀해주시겠어요?"
                     )
@@ -943,6 +956,7 @@ class GeminiSessionViewModel : ViewModel() {
             lastSentSpeechAt = 0L
             usingFallbackAndroidStt = false
             pendingToolConfirmation = null
+            expectingReply = false
             cachedVisualRead = null
             conversationHistory.clear()
             isProcessingUtterance = false
