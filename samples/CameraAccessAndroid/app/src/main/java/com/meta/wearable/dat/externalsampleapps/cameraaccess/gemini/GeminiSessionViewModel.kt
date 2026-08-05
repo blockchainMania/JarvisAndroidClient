@@ -110,6 +110,13 @@ class GeminiSessionViewModel : ViewModel() {
         // VisionQuestionDetector 단축 경로를 절대 타면 안 된다.
         private val IDENTIFY_INTENT_KEYWORDS = listOf("누구야", "누구게", "누구지", "누구니")
 
+        // A save-intent utterance that also names "사람" is asking to register a person's FACE
+        // (save_person + attach_current_photo), not a document/business card (save_life_memory).
+        // Must never take the cachedVisualRead direct-save shortcut below -- that shortcut only
+        // knows how to call save_life_memory, which has no face embedding step at all, so a
+        // person "saved" through it can never later be found by identify_person.
+        private val PERSON_SAVE_KEYWORDS = listOf("사람")
+
         // Present in the utterance, this means the user explicitly wants a fresh look (not a
         // cached read reused), so cache reuse must be skipped even if a recent one exists.
         private val RECAPTURE_KEYWORDS = listOf("다시")
@@ -140,7 +147,7 @@ class GeminiSessionViewModel : ViewModel() {
 - 메일 요청도 마찬가지로 먼저 universal_search로 사람을 찾아 person/person_candidates의 email을 send_email의 to에 넣으세요. send_email은 메일 작성 화면만 열고 실제 발송은 사용자가 앱에서 직접 눌러야 하니, 제목/본문을 사용자가 말한 내용을 바탕으로 자연스럽게 작성해 넣고 호출하세요.
 - save_person, save_meeting, save_memory, save_life_memory, save_need를 호출하기로 결정했으면, 반드시 같은 응답에 텍스트로 "이 내용으로 저장할까요?" 같은 확인 질문도 함께 포함하세요. 이 확인 질문을 사용자가 승인한 뒤에만 실제로 저장이 실행됩니다.
 - 명함을 저장할 때 확인 질문은 이름/회사명/직책/전화번호/이메일주소/회사주소 중 실제로 확인된 항목만 나열해서 물으세요. 예: "이름은 김민수 팀장, 회사는 ABC상사, 전화번호는 010-1234-5678로 인식했어요. 이렇게 저장해드릴까요?" 확인 안 된 항목은 언급하지 말고("전화번호는 없음" 같은 말 하지 말고) 그냥 빼세요.
-- 사용자가 "이 사람 누구야?", "얘 이름 뭐였지?"처럼 지금 보이는 사람이 누구인지 물으면 identify_person을 호출하세요(얼굴로 찾는 것이므로 capture_current_view가 아니라 identify_person을 씁니다). 일치하는 사람이 없다고 나오면 처음 뵙는 분 같다고 말하고 이름을 물어본 뒤, 이름을 들으면 save_person(name, attach_current_photo=true)으로 등록을 제안하세요.
+- 사용자가 "이 사람 누구야?", "얘 이름 뭐였지?"처럼 지금 보이는 사람이 누구인지 물으면 identify_person을 호출하세요(얼굴로 찾는 것이므로 capture_current_view가 아니라 identify_person을 씁니다). 일치하는 사람이 없다고 나오면 처음 뵙는 분 같다고 말하고 이름을 물어본 뒤, 이름을 들으면 save_person(name, attach_current_photo=true)으로 등록을 제안하세요. 일치하는 사람을 찾았으면, 이름만 답하지 말고 곧바로 그 person의 id로 get_proposal_context를 호출해 소속/직책/연락처(명함 정보)와 최근 미팅 이력을 함께 가져온 뒤, 이름과 함께 자연스럽게 요약해서 답하세요(예: "OOO님이에요. ABC상사 팀장이시고, 지난주에 미팅하셨네요."). 특별히 아는 게 없으면 이름만 말해도 되지만, get_proposal_context 호출 자체는 항상 먼저 시도하세요.
 - 사용자가 "이 사람 사진 찍어서 저장해줘", "내 앞에 있는 사람 OO로 저장해줘"처럼 지금 보이는 사람을 사진과 함께 등록해달라고 하면, **capture_current_view는 절대 호출하지 말고** 곧장 save_person을 호출하되 attach_current_photo를 true로 하세요. 얼굴 사진 캡처와 품질 판정은 save_person(attach_current_photo=true) 내부에서 전용 얼굴 인식 모델이 처리합니다 -- capture_current_view로 먼저 확인하면 명함/문서 판독용 모델이 얼굴을 잘못 판정해서 "밝은 곳에서 다시 찍어달라"처럼 부정확한 안내를 낼 수 있습니다.
 - identify_person이나 attach_current_photo를 쓴 save_person의 결과가 "여러 사람이 보여서" 같은 에러를 반환하면, 추측해서 아무 이름이나 대지 말고 그 문장 그대로(또는 비슷한 뜻으로) 사용자에게 전달해 한 사람만 나오게 다시 비춰달라고 요청하세요.
 - 이미지에서 실제로 보이거나 사용자가 말한 내용만 사용하고, 확실하지 않은 이름/번호/내용을 지어내지 마세요.
@@ -651,13 +658,14 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun runRootAgent(text: String) {
         val hasExplicitSaveIntent = SAVE_INTENT_KEYWORDS.any { text.contains(it) }
+        val isPersonFaceSaveIntent = hasExplicitSaveIntent && PERSON_SAVE_KEYWORDS.any { text.contains(it) }
         val wantsFreshCapture = RECAPTURE_KEYWORDS.any { text.contains(it) }
 
         val cachedSnapshot = cachedVisualRead
         val cacheIsFresh = cachedSnapshot != null && !wantsFreshCapture &&
             System.currentTimeMillis() - cachedSnapshot.capturedAtMs <= VISUAL_READ_CACHE_TTL_MS
 
-        if (hasExplicitSaveIntent && cacheIsFresh) {
+        if (hasExplicitSaveIntent && cacheIsFresh && !isPersonFaceSaveIntent) {
             // Save directly instead of routing back through the root agent: feeding the cached
             // read back in as a replayed capture_current_view turn works (Gemini accepts it as
             // long as a user turn precedes the functionCall turn), but in testing the model kept
@@ -682,12 +690,17 @@ class GeminiSessionViewModel : ViewModel() {
                 put("parts", JSONArray().put(JSONObject().put("text", turn.answerText)))
             })
         }
-        if (cacheIsFresh) {
+        if (cacheIsFresh && !isPersonFaceSaveIntent) {
             // Any other follow-up about the same subject ("출력해줘", "전화번호가 뭐야", "다시
             // 말해줘"...) shouldn't force a brand new photo either -- replay the cached read as a
             // capture_current_view turn so the model answers from it directly. Not cleared here
             // (unlike the save path above) since a read-only follow-up doesn't consume the read;
-            // more follow-ups within the same TTL window can keep reusing it.
+            // more follow-ups within the same TTL window can keep reusing it. Excluded for
+            // person-face saves -- replaying a stale document/scene read as capture_current_view
+            // here would give the model something that looks like an already-finished read to
+            // fall back on, defeating the system prompt's save_person(attach_current_photo=true)
+            // rule and producing the same face-less save_life_memory outcome this whole guard
+            // exists to prevent.
             Log.d(TAG, "Non-save follow-up + fresh cached read (${System.currentTimeMillis() - cachedSnapshot.capturedAtMs}ms old) -- replaying instead of recapturing: $text")
             contents.put(JSONObject().apply {
                 put("role", "user")

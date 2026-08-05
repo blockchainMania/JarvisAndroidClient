@@ -34,6 +34,18 @@ android {
     externalNativeBuild {
       cmake {
         arguments += listOf("-DANDROID_STL=c++_shared")
+        // Android's 16KB page-size requirement needs every .so's ELF LOAD segments 4KB-aligned
+        // at minimum -> 16KB; our own CMake targets (jarvis_whisper*, and ggml pulled in via
+        // FetchContent under the same CMake project) were linking at the NDK's old 4KB default.
+        // Applied as linker flags (not per-target) so it reaches ggml's targets too, since
+        // FetchContent_MakeAvailable adds them to this same CMake project rather than as a
+        // separate externalNativeBuild invocation.
+        cFlags += listOf("-Wl,-z,max-page-size=16384")
+        cppFlags += listOf("-Wl,-z,max-page-size=16384")
+        arguments += listOf(
+          "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384",
+          "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384",
+        )
       }
     }
   }
