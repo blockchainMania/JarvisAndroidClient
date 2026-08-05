@@ -8,11 +8,13 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
 import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
+import java.io.IOException
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,6 +57,23 @@ class OpenClawBridge {
 
     private fun nowKstIso(): String =
         ZonedDateTime.now(ZoneId.of("Asia/Seoul")).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+
+    /**
+     * Investigated a reported "얼굴을 인식할 수 없다" identify_person failure: root agent tool
+     * selection was verified correct via curl (it does call identify_person), but the backend
+     * saw zero /people/identify requests during the actual test -- meaning the failure happened
+     * client-side, before any network call, at VisualMemoryFrameStore.captureFreshVisual()'s
+     * null check. Most likely cause: identify_person often runs moments after another tool
+     * (save_person/capture_current_view) already triggered a real glasses capturePhoto() --
+     * the glasses camera pipeline can still be busy from that, making the immediate next capture
+     * attempt fail. One retry after a short delay gives that in-flight capture time to finish.
+     */
+    private suspend fun captureFreshVisualWithRetry(): VisualMemoryFrameStore.VisualFrame? {
+        VisualMemoryFrameStore.captureFreshVisual()?.let { return it }
+        Log.d(TAG, "First capture attempt returned no frame, retrying once after a short delay")
+        delay(500L)
+        return VisualMemoryFrameStore.captureFreshVisual()
+    }
 
     // ─── Connection check (used by UI badge) ─────────────────────
     suspend fun checkConnection() = withContext(Dispatchers.IO) {
@@ -99,7 +118,7 @@ class OpenClawBridge {
                         val attachPhoto = args["attach_current_photo"] == true ||
                             args["attach_current_photo"]?.toString() == "true"
                         if (attachPhoto) {
-                            val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
+                            val visualFrame = captureFreshVisualWithRetry()
                             if (visualFrame != null) {
                                 body.put("image_base64", visualFrame.base64)
                                 body.put("image_mime_type", "image/jpeg")
@@ -110,9 +129,9 @@ class OpenClawBridge {
                         post("/people", body)
                     }
                     "identify_person" -> {
-                        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
+                        val visualFrame = captureFreshVisualWithRetry()
                             ?: return@withContext ToolResult.Failure(
-                                "No fresh camera image is available. Ask the user to hold still and retry."
+                                "지금 카메라에서 사진을 가져오지 못했어요. 카메라 쪽을 봐주시고 다시 한번 말씀해주시겠어요?"
                             )
                         post(
                             "/people/identify",
@@ -156,9 +175,9 @@ class OpenClawBridge {
                         // instead of forcing another physical capturePhoto() -- on glasses that's a
                         // real shutter + ~2s delay, which is exactly the double-capture this avoids.
                         val visualFrame = args["__preCapturedVisualFrame"] as? VisualMemoryFrameStore.VisualFrame
-                            ?: VisualMemoryFrameStore.captureFreshVisual()
+                            ?: captureFreshVisualWithRetry()
                             ?: return@withContext ToolResult.Failure(
-                                "No fresh camera image is available. Ask the user to hold still for a moment and try saving again."
+                                "지금 카메라에서 사진을 가져오지 못했어요. 카메라 쪽을 봐주시고 다시 한번 저장을 요청해주시겠어요?"
                             )
                         body.put("captured_at", capturedAtKst)
                         body.put("image_base64", visualFrame.base64)
@@ -196,6 +215,16 @@ class OpenClawBridge {
                     }
                     else -> ToolResult.Failure("Unknown tool: $toolName")
                 }
+            } catch (e: IOException) {
+                // Distinct from the generic catch below on purpose: this is specifically "the
+                // request never reached/completed against the server" (timeout, DNS, connection
+                // reset -- exactly what unstable cellular data produces), as opposed to a local
+                // capture failure or a server-side rejection. Surfaced in Korean directly so the
+                // root agent doesn't have to guess/paraphrase an OkHttp exception message, and
+                // distinguishable in logs from every other failure mode when diagnosing reports
+                // like "몰라도 사진은 찍혔는데 안 됨" without live device access.
+                Log.e(TAG, "Tool $toolName network error: ${e.message}")
+                ToolResult.Failure("네트워크 연결이 불안정해서 서버에 요청을 보내지 못했어요. 잠시 후 다시 시도해주시겠어요?")
             } catch (e: Exception) {
                 Log.e(TAG, "Tool $toolName error: ${e.message}")
                 ToolResult.Failure(e.message ?: "Unknown error")
