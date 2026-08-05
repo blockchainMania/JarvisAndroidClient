@@ -118,13 +118,17 @@ class OpenClawBridge {
                         val attachPhoto = args["attach_current_photo"] == true ||
                             args["attach_current_photo"]?.toString() == "true"
                         if (attachPhoto) {
+                            // Must fail rather than silently save without a photo: a face-save
+                            // request that "succeeds" with no image produces a person row with no
+                            // face_embedding, which identify_person can never match later -- the
+                            // exact bug this whole flow exists to prevent, and indistinguishable
+                            // from a real success unless it's surfaced now.
                             val visualFrame = captureFreshVisualWithRetry()
-                            if (visualFrame != null) {
-                                body.put("image_base64", visualFrame.base64)
-                                body.put("image_mime_type", "image/jpeg")
-                            }
-                            // No fresh frame available -- save without a photo rather than
-                            // failing the whole request; name/org/role are still useful alone.
+                                ?: return@withContext ToolResult.Failure(
+                                    "지금 카메라에서 사진을 가져오지 못했어요. 카메라 쪽을 봐주시고 다시 한번 저장을 요청해주시겠어요?"
+                                )
+                            body.put("image_base64", visualFrame.base64)
+                            body.put("image_mime_type", "image/jpeg")
                         }
                         post("/people", body)
                     }
