@@ -637,7 +637,19 @@ class GeminiSessionViewModel : ViewModel() {
                 Log.e(TAG, "Root agent step $stepIndex attempt $attempt failed: ${e.message}")
                 null
             }
-            if (step != null) return step
+            // GeminiRootAgentClient.parseStep() returns a non-null RootAgentStep(null, null) when
+            // Gemini's response has a "candidates[0].content.parts" array that's present but
+            // literally empty (finishReason STOP, zero output tokens -- confirmed live in
+            // api.err's "flash response: parts=EMPTY" logs, notably right after an
+            // identify_person multi-face-error retry). That step is not null, so the `step !=
+            // null` check below used to treat it as a finished (empty) answer and return
+            // immediately without ever retrying -- runRootAgent then spoke "죄송해요, 답을 잘 못
+            // 만들었어요" on literally the first attempt, and since every retry of the same
+            // follow-up utterance re-hit this exact same empty-response quirk, it looked to the
+            // user like every "다시 촬영해줘" after a multi-face error just failed outright.
+            // Treat it the same as an exception: worth one retry before giving up for real.
+            if (step != null && (step.functionCall != null || step.text != null)) return step
+            Log.e(TAG, "Root agent step $stepIndex attempt $attempt returned an empty response")
         }
         return null
     }
