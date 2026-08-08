@@ -217,6 +217,15 @@ class OpenClawBridge {
                             ?: return@withContext ToolResult.Failure("person_id required")
                         get("/people/$pid/context")
                     }
+                    "update_person" -> {
+                        val pid = args["person_id"]?.toString()
+                            ?: return@withContext ToolResult.Failure("person_id required")
+                        patch(
+                            "/people/$pid",
+                            args,
+                            listOf("name", "aliases", "org", "role", "phone", "email", "address", "notes_summary"),
+                        )
+                    }
                     else -> ToolResult.Failure("Unknown tool: $toolName")
                 }
             } catch (e: IOException) {
@@ -268,6 +277,28 @@ class OpenClawBridge {
             .addHeader("Content-Type", "application/json")
             .build()
         return execute(request, "POST $path", body)
+    }
+
+    // Deliberately does NOT reuse pick()'s "drop null values" behavior -- unlike a POST create
+    // where an absent field just means "not provided yet", PATCH /people/{id} treats a field's
+    // presence-vs-absence in the body itself as the unset-vs-clear signal (see PersonUpdate's
+    // model_fields_set on the backend). Only fields the model actually named in args are sent at
+    // all here (JSONObject.NULL passed through as-is), so a field the user never mentioned this
+    // turn is genuinely absent from the request and stays untouched server-side.
+    private fun patch(path: String, args: Map<String, Any?>, allowed: List<String>): ToolResult {
+        val body = JSONObject()
+        for (key in allowed) {
+            if (!args.containsKey(key)) continue
+            val value = args[key]
+            body.put(key, value ?: JSONObject.NULL)
+        }
+        val request = Request.Builder()
+            .url("${baseUrl()}$path")
+            .patch(body.toString().toRequestBody(jsonMediaType))
+            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Content-Type", "application/json")
+            .build()
+        return execute(request, "PATCH $path", body)
     }
 
     private fun get(path: String): ToolResult {

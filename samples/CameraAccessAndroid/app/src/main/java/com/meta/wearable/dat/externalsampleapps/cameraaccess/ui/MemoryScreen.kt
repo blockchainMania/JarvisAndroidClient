@@ -78,12 +78,15 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingHist
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.MemoryItem
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.MemoryRepository
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.MemoryViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.people.PersonItem
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.people.PersonViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private enum class RecordsTab(val title: String) {
     Memories("기억"),
     Meetings("회의"),
+    People("사람"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -93,9 +96,11 @@ fun MemoryScreen(
     modifier: Modifier = Modifier,
     memoryViewModel: MemoryViewModel = viewModel(),
     meetingViewModel: MeetingHistoryViewModel = viewModel(),
+    personViewModel: PersonViewModel = viewModel(),
 ) {
     val memoryUiState by memoryViewModel.uiState.collectAsStateWithLifecycle()
     val meetingUiState by meetingViewModel.uiState.collectAsStateWithLifecycle()
+    val personUiState by personViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var selectedTab by rememberSaveable { mutableStateOf(RecordsTab.Memories) }
@@ -103,12 +108,14 @@ fun MemoryScreen(
     var selectedMeeting by remember { mutableStateOf<MeetingHistoryItem?>(null) }
     var editingMemory by remember { mutableStateOf<MemoryItem?>(null) }
     var editingMeeting by remember { mutableStateOf<MeetingHistoryItem?>(null) }
+    var editingPerson by remember { mutableStateOf<PersonItem?>(null) }
     var pendingDeleteMemory by remember { mutableStateOf<MemoryItem?>(null) }
     var pendingDeleteMeeting by remember { mutableStateOf<MeetingHistoryItem?>(null) }
 
     LaunchedEffect(Unit) {
         memoryViewModel.loadRecent()
         meetingViewModel.loadRecent()
+        personViewModel.loadAll()
     }
 
     val currentTitle = when {
@@ -178,6 +185,7 @@ fun MemoryScreen(
                                     when (selectedTab) {
                                         RecordsTab.Memories -> memoryViewModel.refreshCurrent()
                                         RecordsTab.Meetings -> meetingViewModel.loadRecent()
+                                        RecordsTab.People -> personViewModel.refreshCurrent()
                                     }
                                 }
                             ) {
@@ -225,10 +233,10 @@ fun MemoryScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(
-                                            imageVector = if (tab == RecordsTab.Memories) {
-                                                Icons.Default.AutoStories
-                                            } else {
-                                                Icons.Default.Groups2
+                                            imageVector = when (tab) {
+                                                RecordsTab.Memories -> Icons.Default.AutoStories
+                                                RecordsTab.Meetings -> Icons.Default.Groups2
+                                                RecordsTab.People -> Icons.Default.PersonSearch
                                             },
                                             contentDescription = null,
                                             modifier = Modifier.size(18.dp),
@@ -246,6 +254,14 @@ fun MemoryScreen(
                             value = memoryUiState.query,
                             onValueChange = memoryViewModel::updateQuery,
                             onSearch = memoryViewModel::search,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    if (selectedTab == RecordsTab.People) {
+                        PeopleSearchBar(
+                            value = personUiState.query,
+                            onValueChange = personViewModel::updateQuery,
+                            onSearch = personViewModel::search,
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                     }
@@ -299,10 +315,40 @@ fun MemoryScreen(
                                 }
                             }
                         }
+                        RecordsTab.People -> {
+                            RecordsState(
+                                isLoading = personUiState.isLoading,
+                                errorMessage = personUiState.errorMessage,
+                                emptyText = "저장된 사람이 없습니다.",
+                                isEmpty = personUiState.people.isEmpty(),
+                            ) {
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    items(personUiState.people, key = { it.id }) { person ->
+                                        PersonCard(
+                                            person = person,
+                                            onClick = { editingPerson = person },
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    editingPerson?.let { current ->
+        PersonEditDialog(
+            person = current,
+            isSaving = personUiState.isSaving,
+            onDismiss = { editingPerson = null },
+            onSave = { updated ->
+                personViewModel.updatePerson(updated) { editingPerson = null }
+            },
+        )
     }
 
     editingMemory?.let { current ->
