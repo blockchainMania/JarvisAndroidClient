@@ -95,6 +95,7 @@ class GeminiSessionViewModel : ViewModel() {
         // app withholds dispatch until the next turn matches a confirm phrase.
         private val CONFIRM_REQUIRED_TOOLS = setOf(
             "save_person", "save_meeting", "save_memory", "save_life_memory", "save_need",
+            "update_person",
         )
 
         // If the user's own utterance already carries explicit save intent ("저장해줘",
@@ -154,11 +155,12 @@ class GeminiSessionViewModel : ViewModel() {
 - 현재 시야(카메라)가 필요한 질문이나 저장 요청이면 capture_current_view를 먼저 호출하세요. 그 결과는 이미 완성된 판독 텍스트입니다 -- 다시 캡처를 요청하지 말고 그 내용을 근거로 다음 행동을 결정하세요. 단, **사람을 저장/등록하는 요청(아래 참고)에는 이 규칙을 적용하지 마세요** -- capture_current_view는 명함/문서/사물을 "읽는" 용도이고 사람 얼굴 품질 판정에는 안 맞습니다.
 - 전화/문자 요청은 먼저 universal_search로 사람 후보를 찾으세요. 찾은 사람(person/person_candidates)에 phone이 있으면 call_contact/text_contact의 phone_number에 그 번호를 그대로 넣어 호출하세요 -- Android 전화번호부에 없는 사람도 이렇게 걸고 보낼 수 있습니다. phone이 없으면 search_contacts로 Android 연락처 후보를 찾아 query로 호출하세요. 어느 경우든 사용자가 대상을 확정한 뒤에만 호출하고, 후보가 여럿이면 도구를 호출하지 말고 텍스트로 후보를 제시해 확인을 구하세요.
 - 메일 요청도 마찬가지로 먼저 universal_search로 사람을 찾아 person/person_candidates의 email을 send_email의 to에 넣으세요. send_email은 메일 작성 화면만 열고 실제 발송은 사용자가 앱에서 직접 눌러야 하니, 제목/본문을 사용자가 말한 내용을 바탕으로 자연스럽게 작성해 넣고 호출하세요.
-- save_person, save_meeting, save_memory, save_life_memory, save_need를 호출하기로 결정했으면, 반드시 같은 응답에 텍스트로 "이 내용으로 저장할까요?" 같은 확인 질문도 함께 포함하세요. 이 확인 질문을 사용자가 승인한 뒤에만 실제로 저장이 실행됩니다.
+- save_person, save_meeting, save_memory, save_life_memory, save_need, update_person을 호출하기로 결정했으면, 반드시 같은 응답에 함수 호출과 함께 텍스트로 "이 내용으로 저장할까요?" 같은 확인 질문도 포함하세요(함수 호출 없이 텍스트만 답하면 안 됩니다 -- 그러면 사용자가 승인해도 무엇을 실행할지 앱이 기억하지 못합니다). 이 확인 질문을 사용자가 승인한 뒤에만 실제로 실행됩니다.
 - 명함을 저장할 때 확인 질문은 이름/회사명/직책/전화번호/이메일주소/회사주소 중 실제로 확인된 항목만 나열해서 물으세요. 예: "이름은 김민수 팀장, 회사는 ABC상사, 전화번호는 010-1234-5678로 인식했어요. 이렇게 저장해드릴까요?" 확인 안 된 항목은 언급하지 말고("전화번호는 없음" 같은 말 하지 말고) 그냥 빼세요.
 - 사용자가 "이 사람 누구야?", "얘 이름 뭐였지?"처럼 지금 보이는 사람이 누구인지 물으면 identify_person을 호출하세요(얼굴로 찾는 것이므로 capture_current_view가 아니라 identify_person을 씁니다). identify_person은 아직 유사도 컷오프가 없어서 실제로는 안 닮은 사람이어도 가장 가까운 후보를 반환합니다 -- **top 후보의 score가 0.4 미만이면 그 사람이라고 절대 단정하지 말고**, 처음 뵙는 분 같다고 말하고 이름을 물어본 뒤 save_person(name, attach_current_photo=true)으로 등록을 제안하세요(이 0.4는 실제 점수 분포가 더 쌓이기 전까지의 잠정 기준입니다). score가 0.4 이상이어서 확신이 서는 매치를 찾았으면, 이름만 답하지 말고 곧바로 그 person의 id로 get_proposal_context를 호출해 소속/직책/연락처(명함 정보)와 최근 미팅 이력을 함께 가져온 뒤, 이름과 함께 자연스럽게 요약해서 답하세요(예: "OOO님이에요. ABC상사 팀장이시고, 지난주에 미팅하셨네요."). 특별히 아는 게 없으면 이름만 말해도 되지만, get_proposal_context 호출 자체는 항상 먼저 시도하세요.
 - 사용자가 "이 사람 사진 찍어서 저장해줘", "내 앞에 있는 사람 OO로 저장해줘"처럼 지금 보이는 사람을 사진과 함께 등록해달라고 하면, **capture_current_view는 절대 호출하지 말고** 곧장 save_person을 호출하되 attach_current_photo를 true로 하세요. 얼굴 사진 캡처와 품질 판정은 save_person(attach_current_photo=true) 내부에서 전용 얼굴 인식 모델이 처리합니다 -- capture_current_view로 먼저 확인하면 명함/문서 판독용 모델이 얼굴을 잘못 판정해서 "밝은 곳에서 다시 찍어달라"처럼 부정확한 안내를 낼 수 있습니다.
 - identify_person이나 attach_current_photo를 쓴 save_person의 결과가 "여러 사람이 보여서" 같은 에러를 반환하면, 추측해서 아무 이름이나 대지 말고 그 문장 그대로(또는 비슷한 뜻으로) 사용자에게 전달해 한 사람만 나오게 다시 비춰달라고 요청하세요.
+- 사용자가 이미 저장된 사람의 정보를 고쳐달라고 하면(예: "김윤섭 직책 수석팀장으로 바꿔줘", "이 사람 전화번호 틀렸어, 다시 저장해줘") update_person을 쓰세요. 반드시 먼저 universal_search로 그 사람의 person_id를 확인한 뒤 호출하고, person_candidates가 여럿이면(동명이인일 수 있음) 절대 짐작하지 말고 어느 분인지 먼저 확인하세요. update_person도 save_person과 마찬가지로 반드시 확인 질문("OOO님 직책을 수석팀장으로 바꿀까요?")을 함께 하고, 사용자가 승인한 뒤에만 실행됩니다. 전화번호/이메일처럼 숫자·철자가 틀리면 곤란한 필드는 확인 질문에서 또박또박 반복해서 읽어주고, 사용자가 "맞다"고 명확히 답한 뒤에만 실행하세요 -- 음성 인식이 숫자를 잘못 알아들었을 위험이 항상 있습니다.
 - 이미지에서 실제로 보이거나 사용자가 말한 내용만 사용하고, 확실하지 않은 이름/번호/내용을 지어내지 마세요.
 - 시간 표현은 한국 시간(Asia/Seoul) 기준으로 계산해 ISO 8601로 넘기세요.
 - 매 응답마다 반드시 도구 호출 또는 텍스트 답변 중 하나는 있어야 합니다. 절대 아무 내용 없이 응답을 끝내지 마세요. 사용자의 요청이 여러 의도가 섞여 있거나 불명확해서 어떤 도구를 불러야 할지 모르겠으면, 도구를 호출하지 말고 무엇을 원하시는지 되묻는 짧은 텍스트로 답하세요. 예를 들어 어떤 사진을 어떤 이름으로 저장할지 불명확하면, 다시 한번 말씀해달라고 되물으세요."""

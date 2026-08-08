@@ -102,6 +102,7 @@ private fun String.userFacingToolLabel(): String = when (this) {
     "create_calendar_event" -> "일정 등록"
     "save_meeting" -> "회의 저장"
     "save_person" -> "사람 저장"
+    "update_person" -> "사람 정보 수정"
     "save_need" -> "니즈 저장"
     "get_proposal_context" -> "제안 정보 정리"
     else -> "요청 처리"
@@ -138,6 +139,7 @@ object ToolDeclarations {
         .put(universalSearch())
         .put(saveNeed())
         .put(getProposalContext())
+        .put(updatePerson())
 
     // ── helpers ───────────────────────────────────────────────────
     private fun strProp(desc: String) = JSONObject()
@@ -243,6 +245,21 @@ object ToolDeclarations {
         properties = JSONObject()
             .put("reason", strProp("얼굴 인식이 필요한 이유. 예: '앞에 있는 사람 확인'")),
         required = listOf("reason"),
+    )
+
+    private fun updatePerson() = decl(
+        name = "update_person",
+        description = "이미 저장된 사람의 정보를 수정합니다. 예: '김윤섭 직책 수석팀장으로 바꿔줘', '이 사람 메모 추가해줘'. 반드시 먼저 universal_search로 그 사람의 person_id를 확인한 뒤에만 호출하세요 -- 이름만으로 추측해서 호출하지 마세요. 사용자가 언급한 필드만 넣고 나머지는 비워두면 그 필드는 그대로 유지됩니다. 전화번호/이메일처럼 정확도가 중요한 필드는 음성 인식 오류 위험이 있으니, 확인 질문에서 숫자를 또박또박 읽어주고 맞는지 반드시 재확인하세요.",
+        properties = JSONObject()
+            .put("person_id", strProp("universal_search로 확인한 person UUID"))
+            .put("name", strProp("이름 (선택, 언급된 경우만)"))
+            .put("org", strProp("소속 (선택)"))
+            .put("role", strProp("직책 (선택)"))
+            .put("phone", strProp("전화번호 (선택, 정확도 중요 -- 숫자를 또박또박 확인)"))
+            .put("email", strProp("이메일 (선택, 정확도 중요 -- 확인)"))
+            .put("address", strProp("주소 (선택)"))
+            .put("notes_summary", strProp("메모 (선택)")),
+        required = listOf("person_id"),
     )
 
     private fun callContact() = decl(
