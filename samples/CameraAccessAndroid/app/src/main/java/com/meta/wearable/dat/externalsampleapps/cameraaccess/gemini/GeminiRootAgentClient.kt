@@ -70,9 +70,15 @@ object GeminiRootAgentClient {
                 // completely empty response -- finishReason STOP, zero output tokens, not even
                 // truncation -- specifically for queries that should trigger universal_search
                 // (e.g. "OO 검색해줘", "OO한테 전화해줘"). Capping thinkingBudget eliminated it
-                // in every repro case. maxOutputTokens raised to leave headroom beyond the cap.
-                put("maxOutputTokens", 2048)
-                put("thinkingConfig", JSONObject().put("thinkingBudget", 1024))
+                // in every repro case at the time. The system prompt and tool count have both
+                // grown substantially since (send_email, get_proposal_context chaining, the
+                // identify_person score-threshold rule, ...), and api.err logs show the same
+                // empty-response quirk recurring under the heavier reasoning load of an
+                // identify_person multi-face-error retry -- bumped both values for headroom.
+                // stepWithRetry() also now retries on an empty (not just exceptioning) step, as
+                // a second line of defense since no fixed budget can rule this out entirely.
+                put("maxOutputTokens", 3072)
+                put("thinkingConfig", JSONObject().put("thinkingBudget", 1536))
             })
         }
         return call(body)
