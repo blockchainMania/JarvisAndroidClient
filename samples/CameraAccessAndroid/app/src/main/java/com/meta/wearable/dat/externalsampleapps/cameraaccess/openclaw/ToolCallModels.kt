@@ -103,6 +103,7 @@ private fun String.userFacingToolLabel(): String = when (this) {
     "save_meeting" -> "회의 저장"
     "save_person" -> "사람 저장"
     "update_person" -> "사람 정보 수정"
+    "add_person_face" -> "얼굴 추가 등록"
     "save_need" -> "니즈 저장"
     "get_proposal_context" -> "제안 정보 정리"
     else -> "요청 처리"
@@ -140,6 +141,7 @@ object ToolDeclarations {
         .put(saveNeed())
         .put(getProposalContext())
         .put(updatePerson())
+        .put(addPersonFace())
 
     // ── helpers ───────────────────────────────────────────────────
     private fun strProp(desc: String) = JSONObject()
@@ -245,6 +247,14 @@ object ToolDeclarations {
         properties = JSONObject()
             .put("reason", strProp("얼굴 인식이 필요한 이유. 예: '앞에 있는 사람 확인'")),
         required = listOf("reason"),
+    )
+
+    private fun addPersonFace() = decl(
+        name = "add_person_face",
+        description = "이미 저장된 사람의 얼굴 사진을 한 장 더 등록해 인식 정확도를 높입니다. 앱이 지금 카메라 프레임을 찍어 보냅니다. 이럴 때 쓰세요: identify_person이 uncertain으로 나왔는데 사용자가 누구인지 확인해준 경우, 사용자가 '나 잘 못 알아보네'/'내 얼굴 다시 학습시켜줘'라고 한 경우, 등록된 사진이 1장뿐이라고 안내된 경우. 얼굴 사진은 여러 장 있을수록 정확해지므로, 같은 사람을 save_person으로 다시 등록하지 말고(중복 인물이 생깁니다) 반드시 이 도구를 쓰세요.",
+        properties = JSONObject()
+            .put("person_id", strProp("identify_person이나 universal_search 결과에서 가져온 person UUID")),
+        required = listOf("person_id"),
     )
 
     private fun updatePerson() = decl(

@@ -226,6 +226,24 @@ class OpenClawBridge {
                             listOf("name", "aliases", "org", "role", "phone", "email", "address", "notes_summary"),
                         )
                     }
+                    "add_person_face" -> {
+                        val pid = args["person_id"]?.toString()
+                            ?: return@withContext ToolResult.Failure("person_id required")
+                        // Same fresh-capture requirement as identify_person: this enrolls what the
+                        // camera sees right now, so a stale streamed frame would quietly train the
+                        // person on whatever was in view earlier.
+                        val visualFrame = captureFreshVisualWithRetry()
+                            ?: return@withContext ToolResult.Failure(
+                                "지금 카메라에서 사진을 가져오지 못했어요. 카메라 쪽을 봐주시고 다시 한번 말씀해주시겠어요?"
+                            )
+                        post(
+                            "/people/$pid/faces",
+                            JSONObject()
+                                .put("image_base64", visualFrame.base64)
+                                .put("image_mime_type", "image/jpeg")
+                                .put("source", "add_person_face")
+                        )
+                    }
                     else -> ToolResult.Failure("Unknown tool: $toolName")
                 }
             } catch (e: IOException) {

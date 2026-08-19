@@ -87,18 +87,25 @@ class PersonRepository {
         }
     }
 
+    // Android's JSONObject.optString() coerces a JSON null into the 4-character string "null"
+    // rather than returning empty/null, so a person with no org/address read back as literally
+    // "null" and -- once the edit dialog saved that value straight back -- persisted it to the
+    // database as real text. (Observed in production: people.address held the string 'null'.)
+    private fun JSONObject.optStringOrNull(key: String): String? =
+        if (isNull(key)) null else optString(key).ifBlank { null }
+
     private fun parsePerson(json: JSONObject): PersonItem {
         val aliases = json.optJSONArray("aliases")
         return PersonItem(
             id = json.optString("id"),
             name = json.optString("name"),
             aliases = (0 until (aliases?.length() ?: 0)).map { aliases!!.getString(it) },
-            org = json.optString("org").ifBlank { null },
-            role = json.optString("role").ifBlank { null },
-            phone = json.optString("phone").ifBlank { null },
-            email = json.optString("email").ifBlank { null },
-            address = json.optString("address").ifBlank { null },
-            notesSummary = json.optString("notes_summary").ifBlank { null },
+            org = json.optStringOrNull("org"),
+            role = json.optStringOrNull("role"),
+            phone = json.optStringOrNull("phone"),
+            email = json.optStringOrNull("email"),
+            address = json.optStringOrNull("address"),
+            notesSummary = json.optStringOrNull("notes_summary"),
             updatedAtDisplay = formatKst(json.optString("updated_at")),
         )
     }
