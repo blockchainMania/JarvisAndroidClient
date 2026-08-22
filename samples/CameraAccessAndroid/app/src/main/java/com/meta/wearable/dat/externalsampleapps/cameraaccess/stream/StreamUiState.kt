@@ -13,12 +13,12 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 
 import android.graphics.Bitmap
-import com.meta.wearable.dat.camera.types.StreamSessionState
+import com.meta.wearable.dat.camera.types.StreamState
 
 enum class StreamingMode { GLASSES, PHONE }
 
 data class StreamUiState(
-    val streamSessionState: StreamSessionState = StreamSessionState.STOPPED,
+    val streamSessionState: StreamState = StreamState.STOPPED,
     val videoFrame: Bitmap? = null,
     val capturedPhoto: Bitmap? = null,
     val isShareDialogVisible: Boolean = false,

@@ -74,7 +74,7 @@ fun NonStreamScreen(
   val gettingStartedSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
   val scope = rememberCoroutineScope()
   var dropdownExpanded by remember { mutableStateOf(false) }
-  val isDisconnectEnabled = uiState.registrationState is RegistrationState.Registered
+  val isDisconnectEnabled = uiState.registrationState == RegistrationState.REGISTERED
   val activity = LocalActivity.current
   val context = LocalContext.current
 
