@@ -90,7 +90,9 @@ sealed class ToolCallStatus {
         get() = this is Executing
 }
 
-private fun String.userFacingToolLabel(): String = when (this) {
+// internal (was private) so VoiceCommandCatalog can label tools with the same strings
+// the status banner already shows the user.
+internal fun String.userFacingToolLabel(): String = when (this) {
     "capture_current_view" -> "현재 시야 캡처"
     "save_life_memory", "save_memory" -> "기억 저장"
     "universal_search", "search_memory" -> "기억 검색"
@@ -102,6 +104,7 @@ private fun String.userFacingToolLabel(): String = when (this) {
     "create_calendar_event" -> "일정 등록"
     "save_meeting" -> "회의 저장"
     "save_person" -> "사람 저장"
+    "identify_person" -> "사람 알아보기"
     "update_person" -> "사람 정보 수정"
     "save_need" -> "니즈 저장"
     "get_proposal_context" -> "제안 정보 정리"
@@ -181,12 +184,27 @@ object ToolDeclarations {
         .put("description", desc)
         .put("enum", JSONArray(values))
 
+    /**
+     * Phrases a user would actually say, per tool. Kept out of the JSON on purpose -- these are
+     * for the "what can I say" screen, not for the model, whose `description` is written to steer
+     * tool choice and is full of prose that reads as nonsense when shown to a person.
+     */
+    private val userExamplesByTool = mutableMapOf<String, List<String>>()
+
+    fun userExamples(toolName: String): List<String> = userExamplesByTool[toolName].orEmpty()
+
+    /** Tool names deliberately absent from the help screen: the model chains these itself and a
+     * user never phrases them directly. */
+    val INTERNAL_TOOL_NAMES = setOf("get_proposal_context")
+
     private fun decl(
         name: String,
         description: String,
         properties: JSONObject,
         required: List<String>,
+        userExamples: List<String> = emptyList(),
     ): JSONObject = JSONObject().apply {
+        if (userExamples.isNotEmpty()) userExamplesByTool[name] = userExamples
         put("name", name)
         put("description", description)
         put("parameters", JSONObject().apply {
@@ -204,6 +222,11 @@ object ToolDeclarations {
         properties = JSONObject()
             .put("reason", strProp("현재 시야가 필요한 이유. 예: '재료 식별', '명함 읽기', '장면 저장 전 해석'")),
         required = listOf("reason"),
+        userExamples = listOf(
+            "이거 뭐야?",
+            "이 문서 읽어줘",
+            "지금 보이는 거 설명해줘",
+        ),
     )
 
     private fun startRecording() = decl(
@@ -237,6 +260,10 @@ object ToolDeclarations {
                 .put("type", "boolean")
                 .put("description", "true면 현재 카메라 프레임을 얼굴 인식용 참고사진으로 함께 저장 (선택, 기본 false)")),
         required = listOf("name"),
+        userExamples = listOf(
+            "이 사람 홍길동으로 저장해줘",
+            "방금 만난 박부장 등록해줘",
+        ),
     )
 
     private fun identifyPerson() = decl(
@@ -245,6 +272,10 @@ object ToolDeclarations {
         properties = JSONObject()
             .put("reason", strProp("얼굴 인식이 필요한 이유. 예: '앞에 있는 사람 확인'")),
         required = listOf("reason"),
+        userExamples = listOf(
+            "이 사람 누구야?",
+            "얘 이름 뭐였지?",
+        ),
     )
 
     private fun updatePerson() = decl(
@@ -260,6 +291,10 @@ object ToolDeclarations {
             .put("address", strProp("주소 (선택)"))
             .put("notes_summary", strProp("메모 (선택)")),
         required = listOf("person_id"),
+        userExamples = listOf(
+            "김윤섭 직책 수석팀장으로 바꿔줘",
+            "이 사람 메모 추가해줘",
+        ),
     )
 
     private fun callContact() = decl(
@@ -269,6 +304,10 @@ object ToolDeclarations {
             .put("query", strProp("사람 이름. phone_number를 알고 있어도 확인 메시지에 쓰이니 이름은 항상 넣으세요. 이름조차 모르면 전화번호 일부"))
             .put("phone_number", strProp("universal_search로 이미 알아낸 정확한 전화번호 (알고 있으면 이걸 우선 사용)")),
         required = listOf("query"),
+        userExamples = listOf(
+            "김윤섭한테 전화해줘",
+            "박부장한테 전화 걸어줘",
+        ),
     )
 
     private fun searchContacts() = decl(
@@ -278,6 +317,9 @@ object ToolDeclarations {
             .put("query", strProp("연락처 이름, 별칭, 또는 전화번호 일부"))
             .put("top_k", intProp("반환할 최대 후보 수. 기본 5")),
         required = listOf("query"),
+        userExamples = listOf(
+            "내 연락처에서 김대리 찾아줘",
+        ),
     )
 
     private fun textContact() = decl(
@@ -288,6 +330,10 @@ object ToolDeclarations {
             .put("phone_number", strProp("universal_search로 이미 알아낸 정확한 전화번호 (알고 있으면 이걸 우선 사용)"))
             .put("message", strProp("보낼 문자 초안")),
         required = listOf("query", "message"),
+        userExamples = listOf(
+            "김윤섭한테 문자 보내줘",
+            "조금 늦는다고 문자 보내줘",
+        ),
     )
 
     private fun sendEmail() = decl(
@@ -298,6 +344,10 @@ object ToolDeclarations {
             .put("subject", strProp("메일 제목 (선택)"))
             .put("body", strProp("메일 본문")),
         required = listOf("to", "body"),
+        userExamples = listOf(
+            "김윤섭한테 메일 보내줘",
+            "회의 내용 정리해서 메일 써줘",
+        ),
     )
 
     private fun createContact() = decl(
@@ -311,6 +361,9 @@ object ToolDeclarations {
             .put("role", strProp("직책 (선택)"))
             .put("notes", strProp("메모 (선택)")),
         required = listOf("name"),
+        userExamples = listOf(
+            "이 번호 연락처에 저장해줘",
+        ),
     )
 
     private fun createCalendarEvent() = decl(
@@ -323,6 +376,9 @@ object ToolDeclarations {
             .put("location", strProp("장소 (선택)"))
             .put("description", strProp("일정 설명/메모 (선택)")),
         required = listOf("title", "start_at"),
+        userExamples = listOf(
+            "내일 오후 4시 미팅 일정 넣어줘",
+        ),
     )
 
     private fun searchPeople() = decl(
@@ -346,6 +402,9 @@ object ToolDeclarations {
             .put("summary", strProp("미팅 요약 (의미 검색에 쓰임)"))
             .put("raw_transcript", strProp("발화 원문 (선택, 길어도 OK)")),
         required = listOf("person_ids", "started_at", "summary"),
+        userExamples = listOf(
+            "방금 회의 저장해줘",
+        ),
     )
 
     private fun searchMeetings() = decl(
@@ -370,6 +429,10 @@ object ToolDeclarations {
             .put("related_meeting_id", strProp("관련 미팅 UUID (선택)"))
             .put("source", enumProp("출처", listOf("camera", "voice", "manual", "derived"))),
         required = listOf("text", "captured_at"),
+        userExamples = listOf(
+            "이거 기억해",
+            "방금 본 책 제목 메모해둬",
+        ),
     )
 
     private fun saveLifeMemory() = decl(
@@ -385,6 +448,10 @@ object ToolDeclarations {
             .put("related_person_ids", arrStrProp("이미 알고 있는 관련 person UUID 목록 (선택)"))
             .put("source", enumProp("출처", listOf("camera", "voice", "manual", "derived"))),
         required = listOf("captured_at", "user_note", "ai_interpretation"),
+        userExamples = listOf(
+            "이 명함 저장해줘",
+            "이거 저장해줘",
+        ),
     )
 
     private fun searchMemory() = decl(
@@ -409,6 +476,10 @@ object ToolDeclarations {
             .put("time_to", strProp("끝 시간 ISO 8601 (선택)"))
             .put("person_id", strProp("이미 알고 있는 특정 person UUID 필터 (선택)")),
         required = listOf("query"),
+        userExamples = listOf(
+            "김윤섭이랑 회의한 내용 알려줘",
+            "그때 그 명함 찾아줘",
+        ),
     )
 
     private fun saveNeed() = decl(
@@ -426,6 +497,9 @@ object ToolDeclarations {
                 .put("type", "number")
                 .put("description", "0.0~1.0 확신도 (선택, 기본 1.0)")),
         required = listOf("person_id", "text"),
+        userExamples = listOf(
+            "박부장이 단가에 민감하다고 기억해둬",
+        ),
     )
 
     private fun getProposalContext() = decl(

@@ -20,7 +20,8 @@ class WakeWordMonitor(
 ) {
     companion object {
         private const val TAG = "WakeWordMonitor"
-        private const val WAKE_WORD = "자비스"
+        // Public so the "what can I say" screen shows the real wake word.
+        const val WAKE_WORD = "자비스"
         private const val RESTART_DELAY_MS = 150L
 
         fun stripWakeWord(text: String): String {
