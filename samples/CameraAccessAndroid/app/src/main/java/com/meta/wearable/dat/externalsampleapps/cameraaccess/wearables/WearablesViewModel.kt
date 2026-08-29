@@ -60,7 +60,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     // Monitor device selector for active device
     deviceSelectorJob =
         viewModelScope.launch {
-          deviceSelector.activeDevice(Wearables.devices).collect { device ->
+          deviceSelector.activeDeviceFlow().collect { device ->
             _uiState.update { it.copy(hasActiveDevice = device != null) }
           }
         }
@@ -70,7 +70,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
       Wearables.registrationState.collect { value ->
         val previousState = _uiState.value.registrationState
         val showGettingStartedSheet =
-            value is RegistrationState.Registered && previousState is RegistrationState.Registering
+            value == RegistrationState.REGISTERED && previousState == RegistrationState.REGISTERING
         _uiState.update {
           it.copy(registrationState = value, isGettingStartedSheetVisible = showGettingStartedSheet)
         }

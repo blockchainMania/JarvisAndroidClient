@@ -18,7 +18,7 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
 data class WearablesUiState(
-    val registrationState: RegistrationState = RegistrationState.Unavailable(),
+    val registrationState: RegistrationState = RegistrationState.UNAVAILABLE,
     val devices: ImmutableList<DeviceIdentifier> = persistentListOf(),
     val recentError: String? = null,
     val isStreaming: Boolean = false,
@@ -30,5 +30,5 @@ data class WearablesUiState(
     val isSettingsVisible: Boolean = false,
     val isMemoryVisible: Boolean = false,
 ) {
-  val isRegistered: Boolean = registrationState is RegistrationState.Registered || hasMockDevices
+  val isRegistered: Boolean = registrationState == RegistrationState.REGISTERED || hasMockDevices
 }

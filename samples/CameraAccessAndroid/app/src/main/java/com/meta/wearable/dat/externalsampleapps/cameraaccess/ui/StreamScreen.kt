@@ -66,7 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.meta.wearable.dat.camera.types.StreamSessionState
+import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.PendingContactAction
@@ -252,8 +252,8 @@ fun StreamScreen(
         meetingRecordingUiState.isProcessing -> "회의 정리 중"
         geminiUiState.toolCallStatus is ToolCallStatus.Executing -> "요청 처리 중"
         geminiUiState.isGeminiActive -> "Jarvis 듣는 중"
-        streamUiState.streamSessionState == StreamSessionState.STARTING -> "카메라 연결 중"
-        streamUiState.streamSessionState == StreamSessionState.STREAMING -> "Jarvis 준비됨"
+        streamUiState.streamSessionState == StreamState.STARTING -> "카메라 연결 중"
+        streamUiState.streamSessionState == StreamState.STREAMING -> "Jarvis 준비됨"
         else -> "Jarvis 대기 중"
     }
     val statusBody = when {
@@ -263,7 +263,7 @@ fun StreamScreen(
         geminiUiState.toolCallStatus is ToolCallStatus.Executing -> geminiUiState.toolCallStatus.displayText
         geminiUiState.isGeminiActive -> "편하게 말씀해보세요! 눈앞에 보이는 거 물어보기, 기억해두거나 찾아보기, 전화나 문자 부탁도 다 돼요."
         streamUiState.capturedPhoto != null -> "최근 캡처 이미지를 기준으로 답변했습니다. 다시 질문하면 새로 캡처합니다."
-        streamUiState.streamSessionState == StreamSessionState.STREAMING -> "자비스라고 부르거나 AI 버튼을 누르면 질문을 듣습니다."
+        streamUiState.streamSessionState == StreamState.STREAMING -> "자비스라고 부르거나 AI 버튼을 누르면 질문을 듣습니다."
         else -> "글라스 또는 폰 카메라를 연결하면 Jarvis가 현재 시야를 사용할 수 있습니다."
     }
     // AI/회의 status used to have their own chips here too, but that info is already shown by
@@ -273,15 +273,15 @@ fun StreamScreen(
     val statusChips = listOf(
         StatusChipInfo(
             label = when {
-                streamUiState.streamSessionState == StreamSessionState.STREAMING &&
+                streamUiState.streamSessionState == StreamState.STREAMING &&
                     streamUiState.streamingMode == StreamingMode.GLASSES -> "글라스 연결됨"
-                streamUiState.streamSessionState == StreamSessionState.STREAMING -> "폰 카메라 준비"
-                streamUiState.streamSessionState == StreamSessionState.STARTING -> "카메라 연결 중"
+                streamUiState.streamSessionState == StreamState.STREAMING -> "폰 카메라 준비"
+                streamUiState.streamSessionState == StreamState.STARTING -> "카메라 연결 중"
                 else -> "카메라 대기"
             },
             color = when (streamUiState.streamSessionState) {
-                StreamSessionState.STREAMING -> AppColor.Green
-                StreamSessionState.STARTING -> Color(0xFFE7A400)
+                StreamState.STREAMING -> AppColor.Green
+                StreamState.STARTING -> Color(0xFFE7A400)
                 else -> Color(0xFF8A97A8)
             },
         ),
@@ -361,7 +361,7 @@ fun StreamScreen(
                     )
                 } else {
                     EmptyVisualPanel(
-                        isLoading = streamUiState.streamSessionState == StreamSessionState.STARTING,
+                        isLoading = streamUiState.streamSessionState == StreamState.STARTING,
                         modeLabel = if (streamUiState.streamingMode == StreamingMode.PHONE) "Phone Camera" else "Glasses Camera",
                         modifier = Modifier
                             .fillMaxWidth()

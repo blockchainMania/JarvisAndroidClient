@@ -25,15 +25,18 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.meta.wearable.dat.camera.StreamSession
-import com.meta.wearable.dat.camera.startStreamSession
+import com.meta.wearable.dat.camera.Camera
+import com.meta.wearable.dat.camera.Stream
+import com.meta.wearable.dat.camera.addCamera
 import com.meta.wearable.dat.camera.types.PhotoData
 import com.meta.wearable.dat.camera.types.StreamConfiguration
-import com.meta.wearable.dat.camera.types.StreamSessionState
+import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.camera.types.VideoFrame
 import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
+import com.meta.wearable.dat.core.session.DeviceSession
+import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.VisualMemoryFrameStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.PhoneCameraManager
@@ -63,7 +66,11 @@ class StreamViewModel(
 
   companion object {
     private const val TAG = "StreamViewModel"
-    private const val GLASSES_START_TIMEOUT_MS = 12_000L
+    // Raised from 12s for the 0.9 session model: startup is now createSession -> start ->
+    // STARTED -> addCamera -> stream.start() -> STREAMING, several device round trips where
+    // 0.5.0 had one call. Timing out early doesn't just show a false error, it tears down a
+    // session that was about to succeed.
+    private const val GLASSES_START_TIMEOUT_MS = 20_000L
     private const val GLASSES_FRAME_INTERVAL_MS = 100L
     private const val GLASSES_FRAME_LOG_INTERVAL_MS = 5_000L
     private const val GLASSES_STABLE_RESET_MS = 30_000L
@@ -71,13 +78,18 @@ class StreamViewModel(
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
-  private var streamSession: StreamSession? = null
+  private var session: DeviceSession? = null
+  private var camera: Camera? = null
+  private var stream: Stream? = null
 
   private val _uiState = MutableStateFlow(INITIAL_STATE)
   val uiState: StateFlow<StreamUiState> = _uiState.asStateFlow()
 
   private var videoJob: Job? = null
   private var stateJob: Job? = null
+  private var sessionStateJob: Job? = null
+  private var sessionErrorJob: Job? = null
+  private var streamErrorJob: Job? = null
   private var startTimeoutJob: Job? = null
   private var isStreamingServiceRunning = false
     private var hasReachedGlassesStreaming = false
@@ -100,82 +112,149 @@ class StreamViewModel(
     _uiState.update {
       it.copy(
         streamingMode = StreamingMode.GLASSES,
-        streamSessionState = StreamSessionState.STARTING,
+        streamSessionState = StreamState.STARTING,
         errorMessage = null,
       )
     }
 
     VisualMemoryFrameStore.freshStillProvider = ::captureFreshVisualFrame
-    Log.d(TAG, "Starting glasses stream session with HIGH/30fps")
-    val streamSession =
-        Wearables.startStreamSession(
-                getApplication(),
-                deviceSelector,
-                StreamConfiguration(videoQuality = VideoQuality.HIGH, 30),
-            )
-            .also { streamSession = it }
-    _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
-    videoJob =
-        viewModelScope.launch {
-          streamSession.videoStream
-              .conflate()
-              .collectLatest { handleVideoFrame(it) }
+    Log.d(TAG, "Creating glasses device session")
+    // Since SDK 0.7 the one-shot startStreamSession() factory is gone: a DeviceSession is created
+    // and started first, and the camera can only be attached once that session reports STARTED.
+    // So what used to be a single synchronous call is now a small state machine -- attachCamera()
+    // below is what actually begins streaming.
+    Wearables.createSession(deviceSelector)
+        .onSuccess { created ->
+          session = created
+          sessionStateJob =
+              viewModelScope.launch {
+                created.state.collect { sessionState ->
+                  Log.d(TAG, "Glasses device session state: $sessionState")
+                  if (sessionState == DeviceSessionState.STARTED && camera == null) {
+                    attachCamera(created)
+                  }
+                }
+              }
+          sessionErrorJob =
+              viewModelScope.launch {
+                created.errors.collect { error ->
+                  Log.e(TAG, "Glasses device session error: ${error.description}")
+                  _uiState.update { it.copy(errorMessage = error.description) }
+                }
+              }
+          created.start()
         }
+        .onFailure { error, _ ->
+          Log.e(TAG, "Failed to create glasses device session: ${error.description}")
+          _uiState.update {
+            it.copy(
+                streamSessionState = StreamState.STOPPED,
+                errorMessage = error.description,
+            )
+          }
+        }
+    _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
     startTimeoutJob =
         viewModelScope.launch {
           delay(GLASSES_START_TIMEOUT_MS)
           if (
               _uiState.value.streamingMode == StreamingMode.GLASSES &&
-                  _uiState.value.streamSessionState != StreamSessionState.STREAMING
+                  _uiState.value.streamSessionState != StreamState.STREAMING
           ) {
             Log.w(TAG, "Glasses stream did not reach STREAMING before timeout")
             stopActiveStream()
             _uiState.update {
               it.copy(
                   streamingMode = StreamingMode.GLASSES,
-                  streamSessionState = StreamSessionState.STOPPED,
+                  streamSessionState = StreamState.STOPPED,
                   errorMessage =
                       "Glasses stream did not start. Reconnect the glasses/Meta AI app, then try Start Streaming again.",
               )
             }
           }
         }
-    stateJob =
-        viewModelScope.launch {
-          streamSession.state.collect { currentState ->
-            val prevState = _uiState.value.streamSessionState
-            Log.d(TAG, "Glasses stream state: $prevState -> $currentState")
-            _uiState.update { it.copy(streamSessionState = currentState) }
+  }
 
-            if (currentState == StreamSessionState.STREAMING && !isStreamingServiceRunning) {
-              hasReachedGlassesStreaming = true
-              startTimeoutJob?.cancel()
-              startTimeoutJob = null
-              scheduleStableStreamReset()
-              StreamingService.start(getApplication())
-              isStreamingServiceRunning = true
-            }
+  /** Attaches the camera and starts its stream. Only valid once the session reports STARTED. */
+  private fun attachCamera(deviceSession: DeviceSession) {
+    Log.d(TAG, "Attaching glasses camera with HIGH/30fps")
+    deviceSession
+        .addCamera(
+            // compressVideo is stated explicitly rather than left to the default: handleVideoFrame
+            // below decodes raw I420, so if the SDK ever defaults this to true the frames would
+            // arrive encoded and decode into garbage. Pinning it keeps 0.5.0's behaviour.
+            StreamConfiguration(
+                videoQuality = VideoQuality.HIGH,
+                frameRate = 30,
+                compressVideo = false,
+            )
+        )
+        .onSuccess { addedCamera ->
+          camera = addedCamera
+          val addedStream = addedCamera.stream
+          stream = addedStream
 
-            if (
-                currentState != prevState &&
-                    currentState == StreamSessionState.STOPPED &&
-                    hasReachedGlassesStreaming &&
-                    !userRequestedStop
-            ) {
-              _uiState.update {
-                it.copy(
-                  errorMessage =
-                      "Glasses video stream stopped. Check Bluetooth, Meta AI app connection, and camera permission.",
-                )
+          // Subscribe before start() so the initial transitions aren't missed.
+          videoJob =
+              viewModelScope.launch {
+                addedStream.videoStream.conflate().collectLatest { handleVideoFrame(it) }
               }
-              if (isStreamingServiceRunning) {
-                StreamingService.stop(getApplication())
-                  isStreamingServiceRunning = false
+          stateJob = viewModelScope.launch { observeStreamState(addedStream) }
+          streamErrorJob =
+              viewModelScope.launch {
+                addedStream.errorStream.collect { error ->
+                  Log.e(TAG, "Glasses stream error: $error")
+                }
               }
-              scheduleGlassesStreamRestart()
-            }
+
+          // Starting the stream is explicit since SDK 0.7 -- addCamera alone delivers no frames.
+          addedStream.start().onFailure { error, _ ->
+            Log.e(TAG, "Failed to start glasses stream: ${error.description}")
+            _uiState.update { it.copy(errorMessage = error.description) }
           }
         }
+        .onFailure { error, _ ->
+          Log.e(TAG, "Failed to attach glasses camera: ${error.description}")
+          _uiState.update {
+            it.copy(streamSessionState = StreamState.STOPPED, errorMessage = error.description)
+          }
+        }
+  }
+
+  private suspend fun observeStreamState(activeStream: Stream) {
+    activeStream.state.collect { currentState ->
+      val prevState = _uiState.value.streamSessionState
+      Log.d(TAG, "Glasses stream state: $prevState -> $currentState")
+      _uiState.update { it.copy(streamSessionState = currentState) }
+
+      if (currentState == StreamState.STREAMING && !isStreamingServiceRunning) {
+        hasReachedGlassesStreaming = true
+        startTimeoutJob?.cancel()
+        startTimeoutJob = null
+        scheduleStableStreamReset()
+        StreamingService.start(getApplication())
+        isStreamingServiceRunning = true
+      }
+
+      if (
+          currentState != prevState &&
+              currentState == StreamState.STOPPED &&
+              hasReachedGlassesStreaming &&
+              !userRequestedStop
+      ) {
+        _uiState.update {
+          it.copy(
+            errorMessage =
+                "Glasses video stream stopped. Check Bluetooth, Meta AI app connection, and camera permission.",
+          )
+        }
+        if (isStreamingServiceRunning) {
+          StreamingService.stop(getApplication())
+            isStreamingServiceRunning = false
+        }
+        scheduleGlassesStreamRestart()
+      }
+    }
   }
 
   fun startPhoneCamera(lifecycleOwner: LifecycleOwner) {
@@ -198,7 +277,7 @@ class StreamViewModel(
     _uiState.update {
       it.copy(
         streamingMode = StreamingMode.PHONE,
-        streamSessionState = StreamSessionState.STREAMING,
+        streamSessionState = StreamState.STREAMING,
         errorMessage = null,
       )
     }
@@ -229,10 +308,21 @@ class StreamViewModel(
     videoJob = null
     stateJob?.cancel()
     stateJob = null
+    sessionStateJob?.cancel()
+    sessionStateJob = null
+    sessionErrorJob?.cancel()
+    sessionErrorJob = null
+    streamErrorJob?.cancel()
+    streamErrorJob = null
     stableStreamJob?.cancel()
     stableStreamJob = null
-    streamSession?.close()
-    streamSession = null
+    // Stopping the camera detaches the capability and cascades to its stream child. Without it
+    // the next addCamera() is rejected because a camera capability is still active on the session.
+    camera?.stop()
+    camera = null
+    stream = null
+    session?.stop()
+    session = null
     phoneCameraManager?.stop()
     phoneCameraManager = null
     VisualMemoryFrameStore.freshStillProvider = null
@@ -270,7 +360,7 @@ class StreamViewModel(
           if (
               !userRequestedStop &&
                   _uiState.value.streamingMode == StreamingMode.GLASSES &&
-                  _uiState.value.streamSessionState == StreamSessionState.STREAMING
+                  _uiState.value.streamSessionState == StreamState.STREAMING
           ) {
             autoRestartAttempts = 0
             Log.d(TAG, "Glasses stream stable for ${GLASSES_STABLE_RESET_MS}ms; restart counter reset")
@@ -284,7 +374,7 @@ class StreamViewModel(
       return
     }
 
-    if (uiState.value.streamSessionState == StreamSessionState.STREAMING) {
+    if (uiState.value.streamSessionState == StreamState.STREAMING) {
       // Phone mode: capture current video frame as photo
       if (uiState.value.streamingMode == StreamingMode.PHONE) {
         uiState.value.videoFrame?.let { frame ->
@@ -297,7 +387,7 @@ class StreamViewModel(
       _uiState.update { it.copy(isCapturing = true) }
 
       viewModelScope.launch {
-        streamSession
+        stream
             ?.capturePhoto()
             ?.onSuccess { photoData ->
               Log.d(TAG, "Photo capture successful")
@@ -397,7 +487,7 @@ class StreamViewModel(
           // DAT video delivery trails the real scene. Capture only after the spoken request has
           // completed and allow the glasses camera pipeline to catch up before taking the still.
           delay(2000L)
-          val photoData = streamSession?.capturePhoto()?.getOrNull() ?: return null
+          val photoData = stream?.capturePhoto()?.getOrNull() ?: return null
           val bitmap = withContext(Dispatchers.Default) { photoDataToBitmap(photoData) }
           _uiState.update { state -> state.copy(capturedPhoto = bitmap) }
           VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "glasses_capture_photo")
