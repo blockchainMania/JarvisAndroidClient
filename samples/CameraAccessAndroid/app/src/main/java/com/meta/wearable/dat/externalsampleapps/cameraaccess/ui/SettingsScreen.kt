@@ -51,6 +51,7 @@ fun SettingsScreen(
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
     var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
     var showResetDialog by remember { mutableStateOf(false) }
+    var showVoiceCommands by remember { mutableStateOf(false) }
 
     fun save() {
         SettingsManager.geminiAPIKey = geminiAPIKey.trim()
@@ -72,6 +73,11 @@ fun SettingsScreen(
         videoStreamingEnabled = SettingsManager.videoStreamingEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
+    }
+
+    if (showVoiceCommands) {
+        VoiceCommandsScreen(onBack = { showVoiceCommands = false }, modifier = modifier)
+        return
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -137,6 +143,11 @@ fun SettingsScreen(
                 placeholder = "Auto: Jarvis API /live/ws",
                 keyboardType = KeyboardType.Uri,
             )
+
+            SectionHeader("도움말")
+            TextButton(onClick = { showVoiceCommands = true }) {
+                Text("무슨 말을 할 수 있나요?")
+            }
 
             // Speech recognition
             SectionHeader("Speech Recognition")

@@ -102,6 +102,17 @@ class GeminiSessionViewModel : ViewModel() {
         // "기억해줘"...), asking "이렇게 저장할까요?" again is a redundant round trip -- the
         // request itself is the confirmation. The confirm gate stays in place for cases where
         // the AI proposes a save the user didn't ask for (e.g. identify_person's no-match flow).
+        // Shared by pendingContactAction (call/text) and pendingToolConfirmation (save_* tools)
+        // -- covers both "응/전화해" style replies and "네/맞아/저장" style save confirmations.
+        // Public so the "what can I say" screen lists the phrases that actually decide, rather
+        // than a hand-written copy that drifts as these are tuned.
+        val CONFIRM_PHRASES = listOf(
+            "응", "네", "예", "확인", "그래", "맞아", "좋아", "진행", "실행",
+            "저장", "보내", "보내줘", "전화해", "걸어", "걸어줘",
+        )
+        val CANCEL_PHRASES =
+            listOf("취소", "아니", "하지마", "멈춰", "보내지마", "전화하지마", "걸지마")
+
         private val SAVE_INTENT_KEYWORDS = listOf("저장", "기억해", "등록", "기록")
 
         // "내 앞에 있는 아이/사람"처럼 지극히 자연스러운 person-reference 표현도
@@ -1114,18 +1125,12 @@ class GeminiSessionViewModel : ViewModel() {
 
     private fun isContactActionConfirm(text: String): Boolean {
         val normalized = text.replace(" ", "")
-        // Shared by pendingContactAction (call/text) and pendingToolConfirmation (save_* tools)
-        // -- covers both "응/전화해" style replies and "네/맞아/저장" style save confirmations.
-        return listOf(
-            "응", "네", "예", "확인", "그래", "맞아", "좋아", "진행", "실행",
-            "저장", "보내", "보내줘", "전화해", "걸어", "걸어줘",
-        ).any { normalized.contains(it) }
+        return CONFIRM_PHRASES.any { normalized.contains(it) }
     }
 
     private fun isContactActionCancel(text: String): Boolean {
         val normalized = text.replace(" ", "")
-        return listOf("취소", "아니", "하지마", "멈춰", "보내지마", "전화하지마", "걸지마")
-            .any { normalized.contains(it) }
+        return CANCEL_PHRASES.any { normalized.contains(it) }
     }
 
     private suspend fun sendEmail(call: GeminiFunctionCall): ToolResult {
