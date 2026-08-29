@@ -38,6 +38,7 @@ import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GlassesDisplay
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.VisualMemoryFrameStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.PhoneCameraManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
@@ -132,6 +133,8 @@ class StreamViewModel(
                   Log.d(TAG, "Glasses device session state: $sessionState")
                   if (sessionState == DeviceSessionState.STARTED && camera == null) {
                     attachCamera(created)
+                    // Additive: no-ops on frames without a lens, so the spoken flow is unchanged.
+                    GlassesDisplay.attach(created, viewModelScope)
                   }
                 }
               }
@@ -321,6 +324,7 @@ class StreamViewModel(
     camera?.stop()
     camera = null
     stream = null
+    GlassesDisplay.detach(session)
     session?.stop()
     session = null
     phoneCameraManager?.stop()
