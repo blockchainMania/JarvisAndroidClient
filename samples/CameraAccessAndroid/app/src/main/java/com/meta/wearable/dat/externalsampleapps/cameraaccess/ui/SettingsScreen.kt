@@ -34,13 +34,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GlassesDisplay
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    wearablesViewModel: WearablesViewModel = viewModel(),
 ) {
     var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
@@ -143,6 +149,35 @@ fun SettingsScreen(
                 placeholder = "Auto: Jarvis API /live/ws",
                 keyboardType = KeyboardType.Uri,
             )
+
+            // Diagnostics, not a setting: whether the lens attached is otherwise only visible in
+            // a debug log, which is unreachable without a laptop and adb.
+            SectionHeader("글래스 렌즈 상태")
+            val lensStatus by GlassesDisplay.status.collectAsState()
+            val wearablesState by wearablesViewModel.uiState.collectAsStateWithLifecycle()
+            Text(lensStatus.summary, style = MaterialTheme.typography.bodyLarge)
+            lensStatus.detail?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (wearablesState.deviceDiagnostics.isEmpty()) {
+                Text(
+                    "연결된 글래스가 없습니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                wearablesState.deviceDiagnostics.forEach { line ->
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
             SectionHeader("도움말")
             TextButton(onClick = { showVoiceCommands = true }) {

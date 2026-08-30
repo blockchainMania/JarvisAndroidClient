@@ -103,12 +103,35 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
       val job =
           viewModelScope.launch {
             Wearables.devicesMetadata[deviceId]?.collect { metadata ->
-              if (
+              val needsUpdate =
                   metadata.compatibility ==
                       com.meta.wearable.dat.core.types.DeviceCompatibility.DEVICE_UPDATE_REQUIRED
-              ) {
+              if (needsUpdate) {
                 val deviceName = metadata.name.ifEmpty { deviceId }
                 setRecentError("Device '$deviceName' requires an update to work with this app")
+              }
+              // The model is spelled out rather than reduced to a yes/no: META_RAYBAN_DISPLAY vs
+              // RAYBAN_META is the one fact that settles whether a missing lens is a setup
+              // problem at all, and seeing the raw type removes any doubt about detection.
+              val label = metadata.name.ifEmpty { deviceId.toString() }
+              val line = buildString {
+                append(label)
+                append(" · ")
+                append(metadata.deviceType)
+                append(" · ")
+                append(
+                    if (metadata.deviceType.isDisplayCapable) "디스플레이 지원 기기"
+                    else "디스플레이 없는 기기"
+                )
+                append(" · ")
+                append(metadata.linkState)
+                if (needsUpdate) append(" · 펌웨어 업데이트 필요")
+              }
+              _uiState.update { current ->
+                val others = current.deviceDiagnostics.filterNot { it.startsWith(label) }
+                current.copy(
+                    deviceDiagnostics = (others + line).toImmutableList()
+                )
               }
             }
           }

@@ -29,6 +29,10 @@ data class WearablesUiState(
     val isPhoneMode: Boolean = false,
     val isSettingsVisible: Boolean = false,
     val isMemoryVisible: Boolean = false,
+    // One line per connected device: model, whether it has a lens, link state. This is the
+    // single fact that separates "these glasses have no display" from "the display is set up
+    // wrong", and it is not knowable from the phone otherwise.
+    val deviceDiagnostics: ImmutableList<String> = persistentListOf(),
 ) {
   val isRegistered: Boolean = registrationState == RegistrationState.REGISTERED || hasMockDevices
 }
