@@ -10,6 +10,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawEv
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiFunctionCall
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GlassesDisplay
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallRouter
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
@@ -20,8 +21,10 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.CalendarActio
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactActionManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.whisper.WhisperSpeechRecognizer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -226,6 +229,10 @@ class GeminiSessionViewModel : ViewModel() {
     // their answer arrives as a brand new utterance with zero memory of what was asked --
     // producing exactly the "keeps asking questions back and never answers" loop this guards.
     private var expectingReply: Boolean = false
+    // When the current utterance began. Only a frame captured after this belongs to this turn --
+    // VisualMemoryFrameStore.lastUsedFrame outlives the turn, and pairing an answer with an older
+    // photo would show the user the wrong thing with full confidence.
+    private var turnStartedAtMs: Long = 0L
     private val conversationHistory = ArrayDeque<ConversationTurn>()
 
     private val _voiceCommands = MutableSharedFlow<MeetingVoiceCommand>(extraBufferCapacity = 4)
@@ -578,6 +585,7 @@ class GeminiSessionViewModel : ViewModel() {
      * second judge. See JARVIS_ROOT_AGENT_ARCHITECTURE_KO.md Phase 1.
      */
     private suspend fun sendTextOrVisionAnswer(text: String) {
+        turnStartedAtMs = System.currentTimeMillis()
         // Save-intent ("저장해줘"/"기억해줘"...) or identify-intent ("누구야"...) utterances must
         // go through the root agent even if they also match VisionQuestionDetector's keywords --
         // "내 앞에 있는 아이를 도현이라고 저장해줘" contains "앞에있는" just like a plain "what's
@@ -631,6 +639,7 @@ class GeminiSessionViewModel : ViewModel() {
             businessCard = result.businessCard,
         )
         speakAndRemember(text, result.answer)
+        mirrorToLens(heading = result.answer)
     }
 
     /**
@@ -695,7 +704,31 @@ class GeminiSessionViewModel : ViewModel() {
         rememberConversationTurn(userText, answer)
     }
 
+
+    /**
+     * Mirrors what was just said onto the glasses lens, with the photo this turn captured.
+     *
+     * No-ops unless a Ray-Ban Display lens is attached, so nothing here changes behaviour on
+     * frames without one. The photo is included only when it was captured during this turn.
+     */
+    private fun mirrorToLens(
+        heading: String,
+        lines: List<String> = emptyList(),
+        primary: GlassesDisplay.Action? = null,
+        secondary: GlassesDisplay.Action? = null,
+    ) {
+        if (!GlassesDisplay.isReady) return
+        val frame = VisualMemoryFrameStore.lastUsedFrame?.takeIf { it.capturedAtMs >= turnStartedAtMs }
+        viewModelScope.launch {
+            val photo = frame?.let {
+                withContext(Dispatchers.Default) { GlassesDisplay.decodeForLens(it.base64) }
+            }
+            GlassesDisplay.showPhotoCard(photo, heading, lines, primary, secondary)
+        }
+    }
+
     private suspend fun runRootAgent(text: String) {
+        turnStartedAtMs = System.currentTimeMillis()
         val hasExplicitSaveIntent = SAVE_INTENT_KEYWORDS.any { text.contains(it) }
         val isPersonFaceSaveIntent = hasExplicitSaveIntent &&
             (PERSON_SAVE_KEYWORDS.any { text.contains(it) } || DOCUMENT_SAVE_KEYWORDS.none { text.contains(it) })
@@ -789,6 +822,7 @@ class GeminiSessionViewModel : ViewModel() {
                     )
                 } else {
                     speakAndRemember(text, answer)
+                    mirrorToLens(heading = answer)
                 }
                 return
             }
@@ -799,6 +833,14 @@ class GeminiSessionViewModel : ViewModel() {
                 pendingToolConfirmation = PendingToolConfirmation(call.name, call.args)
                 val question = step.text?.takeIf { it.isNotBlank() } ?: "이 내용으로 저장할까요?"
                 speakAndRemember(text, question)
+                // Seeing the actual photo and the extracted fields before approving is the whole
+                // point of the lens here -- a phone number read aloud is the thing users cannot
+                // reliably verify by ear.
+                mirrorToLens(
+                    heading = question,
+                    primary = GlassesDisplay.Action("저장") { confirmPendingToolCall() },
+                    secondary = GlassesDisplay.Action("취소") { cancelPendingToolCall() },
+                )
                 return
             }
 

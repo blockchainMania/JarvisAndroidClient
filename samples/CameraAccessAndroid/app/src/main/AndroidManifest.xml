@@ -36,6 +36,13 @@
             android:name="com.meta.wearable.mwdat.APPLICATION_ID"
             android:value="0"
             />
+        <!-- Required by the Display capability. In Developer Mode attestation is skipped, so
+             both this and APPLICATION_ID stay "0"; real values come from the Wearables
+             Developer Center only when leaving Developer Mode. -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CLIENT_TOKEN"
+            android:value="0"
+            />
 
         <activity
             android:name=".MainActivity"

@@ -60,8 +60,18 @@ object VisualMemoryFrameStore {
         return ageMs <= MAX_FRESH_FRAME_AGE_MS
     }
 
+    /**
+     * The frame most recently handed to a caller. Kept so the lens can show the very photo a
+     * tool acted on -- identify_person and save_person capture inside OpenClawBridge and return
+     * only the server's answer, so without this there is no way to display what was actually
+     * looked at, and showing a *different* capture would be worse than showing none.
+     */
+    @Volatile
+    var lastUsedFrame: VisualFrame? = null
+        private set
+
     suspend fun captureFreshVisual(): VisualFrame? {
-        freshStillProvider?.invoke()?.let { return it }
+        freshStillProvider?.invoke()?.let { lastUsedFrame = it; return it }
         val nowMs = System.currentTimeMillis()
         val jpeg = latestJpeg ?: return null
         val ageMs = latestAgeMs(nowMs) ?: return null
@@ -74,7 +84,7 @@ object VisualMemoryFrameStore {
             width = latestWidth,
             height = latestHeight,
             jpegBytes = jpeg.size,
-        )
+        ).also { lastUsedFrame = it }
     }
 
     fun bitmapToVisualFrame(bitmap: Bitmap, source: String): VisualFrame {

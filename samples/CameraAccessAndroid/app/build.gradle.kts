@@ -93,6 +93,7 @@ dependencies {
   implementation(libs.kotlinx.collections.immutable)
   implementation(libs.mwdat.core)
   implementation(libs.mwdat.camera)
+  implementation(libs.mwdat.display)
   implementation(libs.mwdat.mockdevice)
   // VisionClaw additions
   implementation(libs.okhttp)
