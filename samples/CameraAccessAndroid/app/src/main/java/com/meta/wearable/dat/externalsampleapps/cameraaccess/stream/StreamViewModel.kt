@@ -99,6 +99,18 @@ class StreamViewModel(
     private var userRequestedStop = false
   private var autoRestartJob: Job? = null
   private var autoRestartAttempts = 0
+
+  // The first error of a start attempt is the one that explains it; everything after is fallout.
+  // Observed on device: the glasses ended the session (SESSION_ENDED_BY_DEVICE), the retry then
+  // found nothing (NO_ELIGIBLE_DEVICE), and the second message overwrote the first -- so the
+  // screen sent the user looking for glasses that had just actively refused them.
+  private var startAttemptHasError = false
+
+  private fun reportStartError(message: String) {
+    if (startAttemptHasError) return
+    startAttemptHasError = true
+    _uiState.update { it.copy(errorMessage = message) }
+  }
   private var stableStreamJob: Job? = null
 
   // VisionClaw additions
@@ -108,6 +120,7 @@ class StreamViewModel(
 
   fun startStream() {
     userRequestedStop = false
+    startAttemptHasError = false
     stopActiveStream()
     hasReachedGlassesStreaming = false
     _uiState.update {
@@ -142,19 +155,15 @@ class StreamViewModel(
               viewModelScope.launch {
                 created.errors.collect { error ->
                   Log.e(TAG, "Glasses device session error: $error (${error.description})")
-                  _uiState.update { it.copy(errorMessage = error.guidance()) }
+                  reportStartError(error.guidance())
                 }
               }
           created.start()
         }
         .onFailure { error, _ ->
           Log.e(TAG, "Failed to create glasses device session: $error (${error.description})")
-          _uiState.update {
-            it.copy(
-                streamSessionState = StreamState.STOPPED,
-                errorMessage = error.guidance(),
-            )
-          }
+          _uiState.update { it.copy(streamSessionState = StreamState.STOPPED) }
+          reportStartError(error.guidance())
         }
     _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
     startTimeoutJob =
@@ -214,14 +223,13 @@ class StreamViewModel(
           // Starting the stream is explicit since SDK 0.7 -- addCamera alone delivers no frames.
           addedStream.start().onFailure { error, _ ->
             Log.e(TAG, "Failed to start glasses stream: ${error.description}")
-            _uiState.update { it.copy(errorMessage = error.description) }
+            reportStartError(error.description)
           }
         }
         .onFailure { error, _ ->
           Log.e(TAG, "Failed to attach glasses camera: ${error.description}")
-          _uiState.update {
-            it.copy(streamSessionState = StreamState.STOPPED, errorMessage = error.guidance())
-          }
+          _uiState.update { it.copy(streamSessionState = StreamState.STOPPED) }
+          reportStartError(error.guidance())
         }
   }
 
