@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
+import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GlassesDisplay
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
@@ -213,6 +215,29 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+
+            // The remedies for what the lines above report, rather than instructions to go find
+            // them in the Meta AI app. The glasses-side DAT app in particular is installed and
+            // versioned separately, and a stale one makes the glasses end camera sessions in a
+            // way that is indistinguishable from a connection fault.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val activity = LocalContext.current as? android.app.Activity
+                TextButton(
+                    onClick = { activity?.let { wearablesViewModel.openGlassesAppUpdate(it) } },
+                    enabled = activity != null,
+                ) { Text("글래스 앱 다시 설치") }
+                TextButton(
+                    onClick = { activity?.let { wearablesViewModel.openFirmwareUpdate(it) } },
+                    enabled = activity != null,
+                ) { Text("펌웨어 확인") }
+            }
+            if (wearablesState.registrationState != RegistrationState.REGISTERED) {
+                val activity = LocalContext.current as? android.app.Activity
+                TextButton(
+                    onClick = { activity?.let { wearablesViewModel.startRegistration(it) } },
+                    enabled = activity != null,
+                ) { Text("앱 등록하기") }
             }
 
             SectionHeader("도움말")
