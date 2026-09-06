@@ -163,9 +163,34 @@ fun SettingsScreen(
 
             // Diagnostics, not a setting: whether the lens attached is otherwise only visible in
             // a debug log, which is unreachable without a laptop and adb.
-            SectionHeader("글래스 렌즈 상태")
+            SectionHeader("글래스 진단")
             val lensStatus by GlassesDisplay.status.collectAsState()
             val wearablesState by wearablesViewModel.uiState.collectAsStateWithLifecycle()
+            // Everything the SDK can tell us about why a session might be refused, in one place.
+            // Each of these was guessed at over multiple rounds of debugging before being read
+            // straight from the SDK: dev mode decides whether the "0" manifest placeholders are
+            // accepted at all, and registration reports failures on a stream nothing was reading.
+            Text(
+                "개발자 모드: " + when (wearablesState.isDevMode) {
+                    true -> "켜짐"
+                    false -> "꺼짐 — 이 앱은 개발자 모드에서만 동작합니다"
+                    null -> "확인 전"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (wearablesState.isDevMode == false) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                "앱 등록: ${wearablesState.registrationState}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            wearablesState.registrationError?.let {
+                Text(
+                    "등록 오류: $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Text(lensStatus.summary, style = MaterialTheme.typography.bodyLarge)
             lensStatus.detail?.let {
                 Text(
