@@ -28,8 +28,13 @@ fun DeviceSessionError.guidance(): String = when (this) {
     DeviceSessionError.SESSION_ALREADY_EXISTS ->
         "이미 다른 세션이 열려 있어요. 잠시 후 다시 시도해 주세요."
 
+    // The glasses accepted the session and then killed it, which is a different situation from
+    // never finding them: they were reachable and refused. In practice that is the glasses not
+    // being worn (camera access is gated on wear detection), or something else already holding
+    // the camera -- usually the Meta AI app itself.
     DeviceSessionError.SESSION_ENDED_BY_DEVICE ->
-        "글래스에서 세션을 종료했어요. 다시 시작해 주세요."
+        "글래스가 연결을 받자마자 끊었어요. 글래스를 실제로 착용한 상태인지 확인하고, " +
+            "Meta AI 앱이 카메라를 쓰고 있지 않은지(앱 완전 종료) 확인한 뒤 다시 시작해 주세요."
 
     // Thermal and power states resolve themselves; saying so stops the wearer retrying in a loop.
     DeviceSessionError.THERMAL_CRITICAL,
