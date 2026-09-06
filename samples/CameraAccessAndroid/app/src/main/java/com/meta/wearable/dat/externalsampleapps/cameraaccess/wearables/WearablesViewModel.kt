@@ -20,6 +20,7 @@ import android.app.Activity
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
@@ -64,6 +65,20 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
             _uiState.update { it.copy(hasActiveDevice = device != null) }
           }
         }
+
+    // Developer Mode decides whether attestation runs. The manifest carries APPLICATION_ID and
+    // CLIENT_TOKEN of "0", which are only valid when it is on -- so with it off the glasses
+    // accept a session and then end it, which is exactly the failure being chased.
+    _uiState.update { it.copy(isDevMode = Wearables.isDevMode) }
+
+    // Registration reports failures on its own stream, which nothing was reading. A registration
+    // that degraded after the app looked registered is invisible without it.
+    viewModelScope.launch {
+      Wearables.registrationErrorStream.collect { error ->
+        Log.e(TAG, "Registration error: $error")
+        _uiState.update { it.copy(registrationError = error.toString()) }
+      }
+    }
 
     // This allows the app to react to registration changes (registered, unregistered, etc.)
     viewModelScope.launch {

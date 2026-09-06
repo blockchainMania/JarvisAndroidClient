@@ -33,6 +33,11 @@ data class WearablesUiState(
     // single fact that separates "these glasses have no display" from "the display is set up
     // wrong", and it is not knowable from the phone otherwise.
     val deviceDiagnostics: ImmutableList<String> = persistentListOf(),
+    // Facts the SDK already knows and we were guessing at instead: whether Developer Mode is on
+    // (our manifest uses the "0" placeholders, which are only valid in that mode) and whether
+    // registration actually succeeded, including the errors it reports on its own stream.
+    val isDevMode: Boolean? = null,
+    val registrationError: String? = null,
 ) {
   val isRegistered: Boolean = registrationState == RegistrationState.REGISTERED || hasMockDevices
 }
