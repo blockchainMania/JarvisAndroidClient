@@ -141,18 +141,18 @@ class StreamViewModel(
           sessionErrorJob =
               viewModelScope.launch {
                 created.errors.collect { error ->
-                  Log.e(TAG, "Glasses device session error: ${error.description}")
-                  _uiState.update { it.copy(errorMessage = error.description) }
+                  Log.e(TAG, "Glasses device session error: $error (${error.description})")
+                  _uiState.update { it.copy(errorMessage = error.guidance()) }
                 }
               }
           created.start()
         }
         .onFailure { error, _ ->
-          Log.e(TAG, "Failed to create glasses device session: ${error.description}")
+          Log.e(TAG, "Failed to create glasses device session: $error (${error.description})")
           _uiState.update {
             it.copy(
                 streamSessionState = StreamState.STOPPED,
-                errorMessage = error.description,
+                errorMessage = error.guidance(),
             )
           }
         }
@@ -171,7 +171,8 @@ class StreamViewModel(
                   streamingMode = StreamingMode.GLASSES,
                   streamSessionState = StreamState.STOPPED,
                   errorMessage =
-                      "Glasses stream did not start. Reconnect the glasses/Meta AI app, then try Start Streaming again.",
+                      "글래스 영상이 시작되지 않았어요. 케이스에서 꺼내 착용하고, " +
+                          "Meta AI 앱에서 연결됨으로 보이는지 확인한 뒤 다시 시작해 주세요.",
               )
             }
           }
@@ -219,7 +220,7 @@ class StreamViewModel(
         .onFailure { error, _ ->
           Log.e(TAG, "Failed to attach glasses camera: ${error.description}")
           _uiState.update {
-            it.copy(streamSessionState = StreamState.STOPPED, errorMessage = error.description)
+            it.copy(streamSessionState = StreamState.STOPPED, errorMessage = error.guidance())
           }
         }
   }
