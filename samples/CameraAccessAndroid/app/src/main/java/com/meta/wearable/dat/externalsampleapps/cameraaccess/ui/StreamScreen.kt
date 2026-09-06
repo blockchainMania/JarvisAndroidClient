@@ -175,7 +175,7 @@ fun StreamScreen(
             streamViewModel.startPhoneCamera(lifecycleOwner)
         } else {
             geminiViewModel.streamingMode = StreamingMode.GLASSES
-            streamViewModel.startStream()
+            streamViewModel.startStreamFromUser()
         }
     }
 
