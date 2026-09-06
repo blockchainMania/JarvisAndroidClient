@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -79,9 +80,9 @@ class StreamViewModel(
     private val START_RETRY_DELAYS_MS = longArrayOf(1_000L, 2_000L, 4_000L)
     private const val MAX_START_RETRIES = 3
 
-    // Long enough for a cold link to come up after the app was force-stopped, short enough that
-    // a genuinely absent device still reports rather than hanging.
-    private const val LINK_READY_TIMEOUT_MS = 6_000L
+    // Covers both waits: the SDK discovering the glasses after a cold start, and the link then
+    // reaching CONNECTED. Discovery alone takes a few seconds on a freshly launched app.
+    private const val LINK_READY_TIMEOUT_MS = 10_000L
 
     private const val GLASSES_START_TIMEOUT_MS = 20_000L
     private const val GLASSES_FRAME_INTERVAL_MS = 100L
@@ -203,14 +204,33 @@ class StreamViewModel(
    * session attempt proceed produces a real error to show instead of a spinner that never ends.
    */
   private suspend fun awaitConnectedLink() {
-    val deviceId = deviceSelector.activeDevice() ?: return
-    val metadata = Wearables.devicesMetadata[deviceId] ?: return
-    if (metadata.value.linkState == LinkState.CONNECTED) return
-    Log.d(TAG, "Link is ${metadata.value.linkState}; waiting before creating a session")
-    withTimeoutOrNull(LINK_READY_TIMEOUT_MS) {
-      metadata.first { it.linkState == LinkState.CONNECTED }
+    val ready =
+        withTimeoutOrNull(LINK_READY_TIMEOUT_MS) {
+          // Two waits, and the first one was missing. Right after the app starts the SDK has not
+          // discovered anything yet, so activeDevice() is null -- and returning on that treated
+          // "nothing found yet" as "nothing to wait for", skipping straight to creating a session.
+          // That is precisely the case this exists to cover, and why restarting the app still
+          // failed intermittently after the developer-mode fix.
+          val deviceId = deviceSelector.activeDeviceFlow().filterNotNull().first()
+          Log.d(TAG, "Device available: $deviceId")
+
+          val metadata = Wearables.devicesMetadata[deviceId]
+          if (metadata == null) {
+            Log.w(TAG, "No metadata for $deviceId; proceeding without a link check")
+            return@withTimeoutOrNull true
+          }
+          if (metadata.value.linkState != LinkState.CONNECTED) {
+            Log.d(TAG, "Link is ${metadata.value.linkState}; waiting for CONNECTED")
+            metadata.first { it.linkState == LinkState.CONNECTED }
+          }
+          Log.d(TAG, "Link is CONNECTED")
+          true
+        }
+    if (ready == null) {
+      // Deliberately not fatal: let the attempt run so a real error is reported, rather than
+      // sitting here silently on a spinner.
+      Log.w(TAG, "Gave up waiting for a connected device after ${LINK_READY_TIMEOUT_MS}ms")
     }
-    Log.d(TAG, "Link settled at ${metadata.value.linkState}")
   }
 
   private fun createGlassesSession() {
