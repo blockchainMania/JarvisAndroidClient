@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
+import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GlassesDisplay
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
@@ -213,6 +215,50 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+
+            // The remedies for what the lines above report, rather than instructions to go find
+            // them in the Meta AI app. The glasses-side DAT app in particular is installed and
+            // versioned separately, and a stale one makes the glasses end camera sessions in a
+            // way that is indistinguishable from a connection fault.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val activity = LocalContext.current as? android.app.Activity
+                TextButton(
+                    onClick = { activity?.let { wearablesViewModel.openGlassesAppUpdate(it) } },
+                    enabled = activity != null,
+                ) { Text("글래스 앱 다시 설치") }
+                TextButton(
+                    onClick = { activity?.let { wearablesViewModel.openFirmwareUpdate(it) } },
+                    enabled = activity != null,
+                ) { Text("펌웨어 확인") }
+            }
+            // Re-registering is the remedy when 개발자 모드 reads 꺼짐 while the app is already
+            // REGISTERED. Developer mode is not read from the Meta AI app: the SDK stores it in
+            // this app's own preferences at registration time, and startRegistration passes it as
+            // true -- so a registration made before that becomes permanently stuck at false, and
+            // the only way out is to register again. Both steps live here so it is one screen.
+            val regActivity = LocalContext.current as? android.app.Activity
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = { regActivity?.let { wearablesViewModel.startUnregistration(it) } },
+                    enabled = regActivity != null &&
+                        wearablesState.registrationState == RegistrationState.REGISTERED,
+                ) { Text("등록 해제") }
+                TextButton(
+                    onClick = { regActivity?.let { wearablesViewModel.startRegistration(it) } },
+                    enabled = regActivity != null &&
+                        wearablesState.registrationState != RegistrationState.REGISTERED,
+                ) { Text("다시 등록") }
+            }
+            if (wearablesState.isDevMode == false &&
+                wearablesState.registrationState == RegistrationState.REGISTERED
+            ) {
+                Text(
+                    "등록은 돼 있지만 개발자 모드가 아닙니다. 등록 해제 후 다시 등록해야 " +
+                        "글래스가 카메라 세션을 허용합니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
 
             SectionHeader("도움말")
