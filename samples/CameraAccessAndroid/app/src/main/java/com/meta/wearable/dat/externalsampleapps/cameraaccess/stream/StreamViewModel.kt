@@ -34,6 +34,7 @@ import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.camera.types.VideoFrame
 import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.types.LinkState
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
@@ -57,7 +58,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
 class StreamViewModel(
@@ -75,6 +78,10 @@ class StreamViewModel(
     // force-stopping the app has been seen to need noticeably longer.
     private val START_RETRY_DELAYS_MS = longArrayOf(1_000L, 2_000L, 4_000L)
     private const val MAX_START_RETRIES = 3
+
+    // Long enough for a cold link to come up after the app was force-stopped, short enough that
+    // a genuinely absent device still reports rather than hanging.
+    private const val LINK_READY_TIMEOUT_MS = 6_000L
 
     private const val GLASSES_START_TIMEOUT_MS = 20_000L
     private const val GLASSES_FRAME_INTERVAL_MS = 100L
@@ -181,6 +188,32 @@ class StreamViewModel(
     }
 
     VisualMemoryFrameStore.freshStillProvider = ::captureFreshVisualFrame
+    viewModelScope.launch { awaitConnectedLink(); createGlassesSession() }
+  }
+
+  /**
+   * Waits for the glasses link to actually be up before asking for a camera session.
+   *
+   * Being paired is not the same as being ready: the selector will hand back a device while its
+   * link is still CONNECTING, and a session requested in that window is accepted and then ended
+   * by the glasses (SESSION_ENDED_BY_DEVICE). On device this needed two to ten presses of start
+   * before one happened to land after the link settled.
+   *
+   * Gives up waiting rather than blocking forever -- if the link never settles, letting the
+   * session attempt proceed produces a real error to show instead of a spinner that never ends.
+   */
+  private suspend fun awaitConnectedLink() {
+    val deviceId = deviceSelector.activeDevice() ?: return
+    val metadata = Wearables.devicesMetadata[deviceId] ?: return
+    if (metadata.value.linkState == LinkState.CONNECTED) return
+    Log.d(TAG, "Link is ${metadata.value.linkState}; waiting before creating a session")
+    withTimeoutOrNull(LINK_READY_TIMEOUT_MS) {
+      metadata.first { it.linkState == LinkState.CONNECTED }
+    }
+    Log.d(TAG, "Link settled at ${metadata.value.linkState}")
+  }
+
+  private fun createGlassesSession() {
     Log.d(TAG, "Creating glasses device session")
     // Since SDK 0.7 the one-shot startStreamSession() factory is gone: a DeviceSession is created
     // and started first, and the camera can only be attached once that session reports STARTED.

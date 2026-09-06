@@ -154,6 +154,26 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     }
   }
 
+  /**
+   * Opens the Meta AI app's flow for reinstalling the DAT app that runs on the glasses.
+   *
+   * The glasses-side app is installed and versioned separately from this one, and when it is
+   * missing or stale the glasses accept a camera session and then immediately end it -- which
+   * looks identical to a connection problem from here. The SDK exposes a direct entry point for
+   * it, so the remedy is one tap rather than a walk through the Meta AI app's developer menu.
+   */
+  fun openGlassesAppUpdate(activity: Activity) {
+    Wearables.openDATGlassesAppUpdate(activity).onFailure { error, _ ->
+      setRecentError("글래스 앱 업데이트 화면을 열지 못했어요: ${error.description}")
+    }
+  }
+
+  fun openFirmwareUpdate(activity: Activity) {
+    Wearables.openFirmwareUpdate(activity).onFailure { error, _ ->
+      setRecentError("펌웨어 업데이트 화면을 열지 못했어요: ${error.description}")
+    }
+  }
+
   fun startRegistration(activity: Activity) {
     Wearables.startRegistration(activity)
   }
