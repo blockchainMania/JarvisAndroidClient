@@ -17,6 +17,9 @@ import com.meta.wearable.dat.display.views.ImageSize
 import com.meta.wearable.dat.display.views.TextColor
 import com.meta.wearable.dat.display.views.TextStyle
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -49,6 +52,21 @@ object GlassesDisplay {
     @Volatile private var state: DisplayState? = null
     private var stateJob: Job? = null
 
+    /**
+     * What the lens is doing, in plain Korean, for the Settings screen.
+     *
+     * Attaching happens deep inside a session-state collector, and failing there is by design on
+     * frames with no lens -- so the only evidence was a debug log, which is worth nothing to
+     * anyone without a laptop and adb attached. That made "the display does nothing" and "the
+     * display is not supported here" and "the glasses-side DAT was never installed" completely
+     * indistinguishable from the phone. The SDK's own failure text is surfaced verbatim so the
+     * cause can be read off rather than guessed at.
+     */
+    private val _status = MutableStateFlow(Status("아직 글래스에 연결하지 않았습니다", null))
+    val status: StateFlow<Status> = _status.asStateFlow()
+
+    data class Status(val summary: String, val detail: String?)
+
     /** True once the lens is attached and ready to accept content. */
     val isReady: Boolean
         get() = display != null && state == DisplayState.STARTED
@@ -59,6 +77,7 @@ object GlassesDisplay {
      */
     fun attach(session: DeviceSession, scope: CoroutineScope) {
         if (display != null) return
+        _status.value = Status("렌즈 연결을 시도하는 중…", null)
         session.addDisplay()
             .onSuccess { attached ->
                 display = attached
@@ -67,13 +86,24 @@ object GlassesDisplay {
                     attached.state.collect { newState ->
                         state = newState
                         Log.d(TAG, "Display state: $newState")
+                        _status.value = if (newState == DisplayState.STARTED) {
+                            Status("렌즈 사용 가능 — 화면 표시가 켜져 있습니다", null)
+                        } else {
+                            Status("렌즈 준비 중", "현재 상태: $newState")
+                        }
                     }
                 }
                 Log.d(TAG, "Lens attached")
             }
             .onFailure { error, _ ->
-                // Not an error condition: glasses without a lens land here every session.
+                // Expected on frames with no lens, but from the phone this is indistinguishable
+                // from a setup mistake (glasses-side DAT never installed, app or firmware too
+                // old), so the reason is surfaced rather than swallowed.
                 Log.d(TAG, "No lens on this device (${error.description})")
+                _status.value = Status(
+                    "렌즈를 사용할 수 없습니다",
+                    "사유: ${error.description}",
+                )
             }
     }
 
@@ -86,6 +116,7 @@ object GlassesDisplay {
             state = null
             Log.d(TAG, "Lens detached")
         }
+        _status.value = Status("아직 글래스에 연결하지 않았습니다", null)
     }
 
     /** Scales a capture down to something the 600x600 lens can actually show. */
