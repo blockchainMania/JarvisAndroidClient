@@ -71,6 +71,11 @@ class StreamViewModel(
     // STARTED -> addCamera -> stream.start() -> STREAMING, several device round trips where
     // 0.5.0 had one call. Timing out early doesn't just show a false error, it tears down a
     // session that was about to succeed.
+    // Widening gaps: the link usually settles within a couple of seconds, but a cold start after
+    // force-stopping the app has been seen to need noticeably longer.
+    private val START_RETRY_DELAYS_MS = longArrayOf(1_000L, 2_000L, 4_000L)
+    private const val MAX_START_RETRIES = 3
+
     private const val GLASSES_START_TIMEOUT_MS = 20_000L
     private const val GLASSES_FRAME_INTERVAL_MS = 100L
     private const val GLASSES_FRAME_LOG_INTERVAL_MS = 5_000L
@@ -106,9 +111,46 @@ class StreamViewModel(
   // screen sent the user looking for glasses that had just actively refused them.
   private var startAttemptHasError = false
 
+  // Retries of a start that never produced video. Separate from autoRestartAttempts, which
+  // covers a stream that was working and dropped -- the two failures need different handling.
+  private var startRetryAttempts = 0
+  private var startRetryJob: Job? = null
+
+  /**
+   * Reports a failed start, retrying quietly first.
+   *
+   * Bringing the glasses link up is racy: pressing start too soon after the app launches gets the
+   * session accepted and then immediately ended by the device, and simply trying again works.
+   * On device this took two to five presses -- the user was hand-cranking a retry loop the app
+   * should be doing itself, and every one of those presses looked like a failure.
+   *
+   * So a start that never reached STREAMING is retried on a widening delay before anything is
+   * shown. Only once the retries are spent does the error surface, and by then it is real.
+   */
   private fun reportStartError(message: String) {
     if (startAttemptHasError) return
     startAttemptHasError = true
+
+    if (!userRequestedStop &&
+        !hasReachedGlassesStreaming &&
+        startRetryAttempts < MAX_START_RETRIES &&
+        _uiState.value.streamingMode == StreamingMode.GLASSES
+    ) {
+      startRetryAttempts += 1
+      val delayMs = START_RETRY_DELAYS_MS[startRetryAttempts - 1]
+      Log.w(TAG, "Start failed, retrying in ${delayMs}ms (attempt $startRetryAttempts): $message")
+      startRetryJob?.cancel()
+      startRetryJob =
+          viewModelScope.launch {
+            delay(delayMs)
+            if (!userRequestedStop && _uiState.value.streamingMode == StreamingMode.GLASSES) {
+              startStream()
+            }
+          }
+      return
+    }
+
+    Log.e(TAG, "Start failed after $startRetryAttempts retries: $message")
     _uiState.update { it.copy(errorMessage = message) }
   }
   private var stableStreamJob: Job? = null
@@ -118,9 +160,16 @@ class StreamViewModel(
   var webrtcViewModel: WebRTCSessionViewModel? = null
   private var phoneCameraManager: PhoneCameraManager? = null
 
+  /** Entry point for the user pressing start -- clears the retry budget the automatic path uses. */
+  fun startStreamFromUser() {
+    startRetryAttempts = 0
+    startStream()
+  }
+
   fun startStream() {
     userRequestedStop = false
     startAttemptHasError = false
+    startTimeoutJob?.cancel()
     stopActiveStream()
     hasReachedGlassesStreaming = false
     _uiState.update {
@@ -179,11 +228,13 @@ class StreamViewModel(
               it.copy(
                   streamingMode = StreamingMode.GLASSES,
                   streamSessionState = StreamState.STOPPED,
-                  errorMessage =
-                      "글래스 영상이 시작되지 않았어요. 케이스에서 꺼내 착용하고, " +
-                          "Meta AI 앱에서 연결됨으로 보이는지 확인한 뒤 다시 시작해 주세요.",
               )
             }
+            startAttemptHasError = false
+            reportStartError(
+                "글래스 영상이 시작되지 않았어요. 케이스에서 꺼내 착용하고, " +
+                    "Meta AI 앱에서 연결됨으로 보이는지 확인한 뒤 다시 시작해 주세요.",
+            )
           }
         }
   }
@@ -241,6 +292,8 @@ class StreamViewModel(
 
       if (currentState == StreamState.STREAMING && !isStreamingServiceRunning) {
         hasReachedGlassesStreaming = true
+        // Video is flowing, so the link is up: give the retry budget back for any later attempt.
+        startRetryAttempts = 0
         startTimeoutJob?.cancel()
         startTimeoutJob = null
         scheduleStableStreamReset()
@@ -303,6 +356,8 @@ class StreamViewModel(
     autoRestartJob = null
     stableStreamJob?.cancel()
     stableStreamJob = null
+    startRetryJob?.cancel()
+    startRetryJob = null
     stopActiveStream()
     _uiState.update { INITIAL_STATE }
   }
@@ -328,6 +383,8 @@ class StreamViewModel(
     streamErrorJob = null
     stableStreamJob?.cancel()
     stableStreamJob = null
+    startRetryJob?.cancel()
+    startRetryJob = null
     // Stopping the camera detaches the capability and cascades to its stream child. Without it
     // the next addCamera() is rejected because a camera capability is still active on the session.
     camera?.stop()
