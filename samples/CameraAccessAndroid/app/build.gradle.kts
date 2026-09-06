@@ -6,6 +6,30 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.TimeZone
+
+/**
+ * The commit this APK was actually built from.
+ *
+ * Read at configuration time and surfaced in Settings because "is the running app built from the
+ * code I think it is?" has been unanswerable from the phone, and guessing it wrong has cost more
+ * than one debugging session: a stale Gradle build reports BUILD SUCCESSFUL while leaving a
+ * week-old APK in place, and there is no way to notice from the device.
+ */
+fun gitDescribe(): String = try {
+    val process = ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+        .directory(rootDir)
+        .redirectErrorStream(true)
+        .start()
+    val text = process.inputStream.bufferedReader().readText().trim()
+    process.waitFor()
+    text.ifEmpty { "unknown" }
+} catch (e: Exception) {
+    "unknown"
+}
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.jetbrains.kotlin.android)
@@ -25,6 +49,17 @@ android {
     targetSdk = 34
     versionCode = 1
     versionName = "1.0"
+
+    buildConfigField("String", "GIT_SHA", "\"${gitDescribe()}\"")
+    buildConfigField(
+        "String",
+        "BUILD_TIME",
+        "\"${
+            SimpleDateFormat("yyyy-MM-dd HH:mm").apply {
+                timeZone = TimeZone.getTimeZone("Asia/Seoul")
+            }.format(Date())
+        }\"",
+    )
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     vectorDrawables { useSupportLibrary = true }

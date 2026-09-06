@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GlassesDisplay
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
@@ -108,6 +109,16 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             // Gemini section
+            // First thing on the screen, deliberately: "is the running app built from the code
+            // I think it is?" was unanswerable from the phone, and a stale Gradle build reports
+            // BUILD SUCCESSFUL while leaving an old APK in place -- which cost a week of chasing
+            // a display bug in an APK that never contained the display code.
+            Text(
+                "빌드 ${BuildConfig.GIT_SHA} · ${BuildConfig.BUILD_TIME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
             SectionHeader("Gemini API")
             MonoTextField(
                 value = geminiAPIKey,
