@@ -232,12 +232,33 @@ fun SettingsScreen(
                     enabled = activity != null,
                 ) { Text("펌웨어 확인") }
             }
-            if (wearablesState.registrationState != RegistrationState.REGISTERED) {
-                val activity = LocalContext.current as? android.app.Activity
+            // Re-registering is the remedy when 개발자 모드 reads 꺼짐 while the app is already
+            // REGISTERED. Developer mode is not read from the Meta AI app: the SDK stores it in
+            // this app's own preferences at registration time, and startRegistration passes it as
+            // true -- so a registration made before that becomes permanently stuck at false, and
+            // the only way out is to register again. Both steps live here so it is one screen.
+            val regActivity = LocalContext.current as? android.app.Activity
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(
-                    onClick = { activity?.let { wearablesViewModel.startRegistration(it) } },
-                    enabled = activity != null,
-                ) { Text("앱 등록하기") }
+                    onClick = { regActivity?.let { wearablesViewModel.startUnregistration(it) } },
+                    enabled = regActivity != null &&
+                        wearablesState.registrationState == RegistrationState.REGISTERED,
+                ) { Text("등록 해제") }
+                TextButton(
+                    onClick = { regActivity?.let { wearablesViewModel.startRegistration(it) } },
+                    enabled = regActivity != null &&
+                        wearablesState.registrationState != RegistrationState.REGISTERED,
+                ) { Text("다시 등록") }
+            }
+            if (wearablesState.isDevMode == false &&
+                wearablesState.registrationState == RegistrationState.REGISTERED
+            ) {
+                Text(
+                    "등록은 돼 있지만 개발자 모드가 아닙니다. 등록 해제 후 다시 등록해야 " +
+                        "글래스가 카메라 세션을 허용합니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
 
             SectionHeader("도움말")
