@@ -106,14 +106,6 @@ android {
     resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     jniLibs { pickFirsts += "**/libc++_shared.so" }
   }
-  signingConfigs {
-    getByName("debug") {
-      storeFile = file("sample.keystore")
-      storePassword = "sample"
-      keyAlias = "sample"
-      keyPassword = "sample"
-    }
-  }
 }
 
 dependencies {

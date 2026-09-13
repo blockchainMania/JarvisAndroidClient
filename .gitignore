@@ -3,7 +3,12 @@
 # Android
 samples/CameraAccessAndroid/app/src/main/java/**/Secrets.kt
 samples/CameraAccessAndroid/local.properties
+samples/local.properties
 samples/CameraAccessAndroid/app/google-services.json
 samples/CameraAccessAndroid/.gradle/
 samples/CameraAccessAndroid/build/
 samples/CameraAccessAndroid/app/build/
+samples/CameraAccessAndroid/app/sample.keystore
+
+# Android Studio / IntelliJ project metadata
+.idea/
